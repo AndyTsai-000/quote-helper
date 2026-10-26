@@ -1,0 +1,1548 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font-size:14px;font-family:system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>估價單小幫手</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* 版面：左邊三個步驟、右邊品項預覽；手機時上下排 */
+:root{
+  --bg:#f3f5f2; --panel:#ffffff; --fg:#1d2621; --muted:#5f6d65; --line:#d8dfd9;
+  --accent:#1f7a4d; --accent-fg:#ffffff; --accent-soft:#e3f1e8; --warn:#a2610a; --warn-soft:#fbefdc;
+  --body:"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141a17; --panel:#1c2420; --fg:#e4ebe6; --muted:#9aa9a0; --line:#2f3a34;
+  --accent:#4cbf86; --accent-fg:#0d1b14; --accent-soft:#1d3528; --warn:#e6a64a; --warn-soft:#3a2c17; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141a17; --panel:#1c2420; --fg:#e4ebe6; --muted:#9aa9a0; --line:#2f3a34;
+  --accent:#4cbf86; --accent-fg:#0d1b14; --accent-soft:#1d3528; --warn:#e6a64a; --warn-soft:#3a2c17; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.6}
+.wrap{max-width:1120px;margin:0 auto;padding-block:28px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1{font-size:26px;margin:0 0 4px;text-wrap:balance}
+.sub{color:var(--muted);margin:0 0 24px;max-width:70ch}
+.grid{display:grid;grid-template-columns:minmax(0,370px) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:780px){.grid{grid-template-columns:minmax(0,1fr)}}
+.steps{display:flex;flex-direction:column;gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
+.step-h{display:flex;align-items:center;gap:10px;font-weight:700;margin-bottom:10px}
+.num{font-family:var(--mono);font-size:13px;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent)}
+.done .num{background:var(--accent);color:var(--accent-fg)}
+.pick{display:block;border:1.5px dashed var(--line);border-radius:8px;padding:14px;text-align:center;cursor:pointer;color:var(--muted)}
+.pick:hover,.pick:focus-within{border-color:var(--accent);color:var(--fg)}
+.pick input{position:absolute;opacity:0;width:1px;height:1px}
+.pick b{color:var(--accent)}
+.picked{margin-top:8px;font-size:14px;word-break:break-all}
+.alt{font-size:13px;color:var(--muted);margin-top:6px}
+.alt label{color:var(--accent);cursor:pointer;text-decoration:underline}
+.alt input{display:none}
+.field{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;font-size:14px}
+.field small{font-size:12px;color:var(--muted)}
+select,input[type=text]{font:inherit;font-size:14px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);max-width:60%}
+input[type=text]{width:60%}
+.mini{font-size:13px;padding:5px 10px;border:1px solid var(--line);border-radius:6px;cursor:pointer;color:var(--accent);background:var(--bg);white-space:nowrap}
+.mini:hover,.mini:focus-within{border-color:var(--accent)}
+.mini input{position:absolute;opacity:0;width:1px;height:1px}
+.tplinfo{margin-top:10px;padding:10px 12px;border-radius:8px;background:var(--accent-soft);font-size:13px;display:flex;flex-direction:column;gap:2px}
+.tpl-name{font-weight:700;color:var(--accent);word-break:break-all}
+.tpl-meta{color:var(--muted);overflow-wrap:anywhere}
+button.link{align-self:flex-start;background:none;border:0;padding:0;margin-top:4px;color:var(--warn);font:inherit;font-size:13px;text-decoration:underline;cursor:pointer}
+button.go{width:100%;font:inherit;font-weight:700;font-size:16px;padding:12px;border:0;border-radius:8px;background:var(--accent);color:var(--accent-fg);cursor:pointer;margin-top:14px}
+button.go:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.msg{font-size:14px;margin-top:10px;min-height:1.2em}
+.msg.err{color:var(--warn)}
+.sum{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.pill{font-size:13px;padding:3px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:500}
+.pill.w{background:var(--warn-soft);color:var(--warn)}
+.tag{font-size:12px;padding:2px 8px;border-radius:4px;background:var(--warn-soft);color:var(--warn);margin-left:8px;font-weight:500}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;vertical-align:middle}
+th{font-size:12px;color:var(--muted);font-weight:500;letter-spacing:.04em}
+td.r{font-family:var(--mono);color:var(--muted);font-variant-numeric:tabular-nums;width:44px}
+.thumbs{display:flex;gap:6px;flex-wrap:wrap}
+.thumbs figure{margin:0;text-align:center;font-size:11px;color:var(--muted);max-width:90px}
+.thumbs img,.ph{height:56px;width:auto;max-width:90px;border-radius:4px;border:1px solid var(--line);display:block;object-fit:contain;background:var(--bg)}
+.ph{width:72px}
+.thumbs figcaption{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.drop-on .card{border-color:var(--accent)}
+.muted{color:var(--muted)}
+[hidden]{display:none!important}
+.picked button.link{margin:0 0 0 6px}
+.check{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:14px;cursor:pointer}
+.check input{accent-color:var(--accent);width:16px;height:16px}
+input.nm{width:100%;max-width:none;font:inherit;font-size:14px;border:1px solid transparent;background:transparent;padding:4px 6px;border-radius:4px;color:var(--fg)}
+input.nm:hover,input.nm:focus{border-color:var(--line);background:var(--bg)}
+.ai-wait{font-size:12px;color:var(--accent);padding-left:6px}
+select.rm{font-size:12px;padding:1px 4px;margin:2px 0 0 6px;max-width:none;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <h1>估價單小幫手</h1>
+  <p class="sub">放入圖片或圖片資料夾，<span id="subName">品名用圖片檔名，可以直接修改</span>，產生 Excel 估價單、PPT 簡報或 Word 估價單。可以放自己的範本（Excel、PDF 或 PPT），照範本的樣子做。檔案也可以直接拖進這個頁面。</p>
+
+  <div class="grid">
+    <div class="steps">
+      <section class="card" id="s1">
+        <div class="step-h"><span class="num">1</span>要產生什麼</div>
+        <div class="field"><span>檔案類型</span><select id="qFmt">
+          <option value="xlsx" selected>Excel 估價單</option>
+          <option value="pptx">PPT 簡報</option>
+          <option value="docx">Word 估價單</option>
+        </select></div>
+        <div class="field" id="tplPick"><span>範本 <small>（可不放）</small></span><label class="mini"><input type="file" id="tplFile" accept=".xlsx,.xlsm,.pdf,.pptx">選 Excel／PDF／PPT</label></div>
+        <div class="tplinfo" id="tplInfo" hidden></div>
+        <div class="field" id="companyField"><span>公司名稱</span><input type="text" id="qCompany" placeholder="例：好家居設計"></div>
+        <div class="field"><span>客戶名稱</span><input type="text" id="qClient" placeholder="例：王先生"></div>
+        <div class="field" id="taxField"><span>營業稅 5%</span><select id="qTax"><option value="0" selected>不加</option><option value="1">要加</option></select></div>
+      </section>
+
+      <section class="card" id="s2">
+        <div class="step-h"><span class="num">2</span>圖片</div>
+        <label class="pick"><input type="file" id="files" accept="image/*" multiple>點這裡選擇 <b>圖檔</b>（可一次選多張）</label>
+        <div class="alt">或 <label for="folder">選擇圖片資料夾</label><input type="file" id="folder" webkitdirectory multiple>　再選一次會加在原本的後面</div>
+        <div class="picked" id="imgName"></div>
+        <label class="check" id="aiField" hidden><input type="checkbox" id="aiOn" checked> 用 AI 看圖片取品名</label>
+        <div class="msg" id="aiMsg"></div>
+      </section>
+
+      <section class="card" id="s3">
+        <div class="step-h"><span class="num">3</span>產生</div>
+        <div class="field" id="sizeField"><span>圖片大小</span><select id="size">
+          <option value="60">小（60 像素高）</option>
+          <option value="100" selected>中（100 像素高）</option>
+          <option value="160">大（160 像素高）</option>
+        </select></div>
+        <button class="go" id="go" disabled>下載 Excel 估價單</button>
+        <div class="msg" id="msg"></div>
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="step-h" style="margin-bottom:8px">品項<span class="tag" id="sample">範例</span></div>
+      <div class="sum" id="sum"></div>
+      <div class="tbl"><table>
+        <thead><tr><th>項次</th><th>品名</th><th>圖片</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table></div>
+    </section>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const IMG_EXT = /\.(jpe?g|png|gif|webp|bmp)$/i;
+const TPL_EXT = /\.(xlsx|xlsm|pdf|pptx)$/i;
+const EMU = 9525; // 1 像素 = 9525 EMU
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+let images = [], tpl = null; // tpl = { kind, name, buf, spec }
+
+// ---------- 小工具 ----------
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const stemOf = name => name.replace(/\.[^.]+$/, '');
+const flat = t => String(t ?? '').normalize('NFKC').replace(/\s+/g, '');
+const clone = o => JSON.parse(JSON.stringify(o ?? {}));
+const range = (a, b) => Array.from({ length: Math.max(0, b - a + 1) }, (_, i) => a + i);
+const fmtDate = (d, sep = '/') => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join(sep);
+const todayStr = sep => fmtDate(new Date(), sep);
+function colLetter(n) { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+function showMsg(t, err) { $('msg').textContent = t; $('msg').classList.toggle('err', !!err); }
+function cellText(cell) {
+  if (cell.value instanceof Date) return fmtDate(cell.value);
+  try { return cell.text ?? ''; } catch { return String(cell.value ?? ''); }
+}
+
+// 檔名去掉前後的編號，例如「01_沙發-2.jpg」→「沙發」
+function itemName(name) {
+  const s = stemOf(name).trim();
+  const t = s.replace(/^\d+[\s._\-、）)]+/, '').replace(/(?:[\s_\-]\d{1,2}|\s*[（(]\d{1,2}[)）])$/, '').trim();
+  return t || s;
+}
+const labelOf = img => (img.label || '').trim() || itemName(img.name);
+
+// ---------- 空間分組（PPT 同空間的家具放同一頁） ----------
+const ROOMS = ['客廳', '餐廳', '臥室', '書房', '廚房', '衛浴', '玄關', '兒童房', '戶外', '其他'];
+const ROOM_KEYS = [
+  ['客廳', /沙發|茶几|電視櫃|邊几|邊桌|單椅|躺椅|主人椅|腳凳|地毯|落地燈/],
+  ['餐廳', /餐桌|餐椅|餐邊櫃|餐櫃|酒櫃|吧檯|吧台/],
+  ['臥室', /床|衣櫃|梳妝|化妝|斗櫃|衣架/],
+  ['書房', /書桌|書櫃|書架|辦公椅|電腦椅|工作桌/],
+  ['廚房', /廚具|流理|冰箱|爐|抽油煙|電器櫃/],
+  ['衛浴', /馬桶|浴|洗手|面盆|鏡櫃/],
+  ['玄關', /鞋櫃|玄關|穿鞋/],
+  ['兒童房', /兒童|嬰兒|童/],
+  ['戶外', /戶外|陽台|庭園/],
+];
+const guessRoom = name => (ROOM_KEYS.find(([, re]) => re.test(name)) || ['其他'])[0];
+const roomOf = img => img.room || guessRoom(labelOf(img));
+// 依空間分頁，一頁最多 4 件，太多就平均拆成幾頁，頁面才不會擠
+function roomPages(items, max = 4) {
+  const groups = new Map();
+  for (const img of items) { const r = roomOf(img); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(img); }
+  const pages = [];
+  for (const room of [...groups.keys()].sort((a, b) => ROOMS.indexOf(a) - ROOMS.indexOf(b))) {
+    const list = groups.get(room), n = Math.ceil(list.length / max), size = Math.ceil(list.length / n);
+    for (let k = 0, part = 1; k < list.length; k += size, part++) pages.push({ title: n > 1 ? `${room}（${part}/${n}）` : room, items: list.slice(k, k + size) });
+  }
+  return pages;
+}
+const byName = (a, b) => a.name.localeCompare(b.name, 'en', { numeric: true });
+const quoteItems = () => [...images]; // 照加入的順序
+
+// ---------- 欄位與抬頭的辨識 ----------
+const ROLE_RE = [
+  ['index', /^(項次|項|序|序號|編號|項目編號|no\.?|item)$/i],
+  ['image', /(圖片|照片|圖示|示意|樣式|產品圖|參考圖)/],
+  ['qty', /(數量|qty)/i],
+  ['unit', /^(單位|unit)$/i],
+  ['price', /(單價|price)/i],
+  ['amount', /(金額|複價|總價|小計|amount)/i],
+  ['name', /(品名|名稱|品項|產品名|商品|description)/i],
+  // 「項目」「內容」這類詞可能是品名也可能是編號，沒有更明確的品名欄才當品名
+  ['nameWeak', /(項目|工程|內容|說明|產品)/],
+];
+const ROLE_LABEL = { index: '編號', name: '品名', image: '圖片', qty: '數量', unit: '單位', price: '單價', amount: '金額' };
+function roleOf(t) {
+  t = flat(t);
+  if (!t || t.length > 12) return 'other';
+  // 「名稱及圖片」這種一欄寫品名也放圖片
+  if (/品名|名稱|品項|產品/.test(t) && /圖片|照片|圖示/.test(t)) return 'nameImage';
+  for (const [r, re] of ROLE_RE) if (re.test(t)) return r;
+  return 'other';
+}
+const roleLabel = c => c.alsoImage ? '品名＋圖片' : ROLE_LABEL[c.role];
+const isHeader = texts => new Set(texts.map(roleOf).filter(r => r !== 'other')).size >= 3;
+// hints[i] = 'index'：這欄在範本裡已經填好 1、2、3，是編號欄
+function withRoles(names, hints = []) {
+  const seen = new Set();
+  const out = names.map((name, i) => {
+    let role = roleOf(name);
+    if (hints[i] === 'index' && ['nameWeak', 'other', 'index'].includes(role)) role = 'index';
+    if (!['other', 'nameWeak'].includes(role) && seen.has(role)) role = 'other';
+    seen.add(role);
+    return { name, role };
+  });
+  const ni = out.find(c => c.role === 'nameImage');
+  if (ni) { if (out.some(c => c.role === 'name')) ni.role = 'image'; else { ni.role = 'name'; ni.alsoImage = true; } }
+  if (!out.some(c => c.role === 'name')) { const w = out.find(c => c.role === 'nameWeak'); if (w) w.role = 'name'; }
+  out.forEach(c => { if (c.role === 'nameWeak' || c.role === 'nameImage') c.role = 'other'; });
+  return out;
+}
+const TOTAL_RE = /(小計|合計|總計|總價|總金額|營業稅|稅額|稅金)/;
+const CLIENT_LABEL = /(客戶|顧客|業主|貴賓|買受人|訂購人)/, DATE_LABEL = /日期/;
+const CLIENT_ONLY = /^(客戶名稱|客戶姓名|客戶|顧客|業主|貴賓|買受人|訂購人)$/, DATE_ONLY = /^(報價日期|估價日期|日期)$/;
+// 「客戶：王先生」或「客戶名稱　王先生」都認得
+const STOP = '(?:(?!日期|報價|估價|電話|地址|統一編號|統編|聯絡|傳真|手機|簽|蓋|確認)[^\\s:：])*';
+const CLIENT_RE = new RegExp(`(客戶名稱|客戶姓名|客戶|顧客|業主|貴賓|買受人|訂購人)(\\s*[:：]\\s*|\\s+)${STOP}`, 'g');
+const DATE_RE = /(報價日期|估價日期|日期)(\s*[:：]\s*|\s+)[\d０-９\/\-.年月日]*/g;
+// 把範本上的「客戶：」「日期：」換成這次的
+function fillInfo(t) {
+  const c = $('qClient').value.trim();
+  return String(t).replace(CLIENT_RE, (m, a, b) => a + b + c).replace(DATE_RE, (m, a, b) => a + b + todayStr('/'));
+}
+
+const DEFAULT_COLS = ['項次', '圖片', '品名', '規格', '數量', '單位', '單價', '金額', '備註'];
+function ensureCols(cols) {
+  if (!cols.some(c => c.role === 'name')) cols.splice(Math.min(1, cols.length), 0, { name: '品名', role: 'name' });
+  if (!cols.some(c => c.role === 'image')) cols.splice(cols.findIndex(c => c.role === 'name'), 0, { name: '圖片', role: 'image' });
+  return cols;
+}
+// 估價單的內容：抬頭幾行、表格欄位、表格下面的備註
+function currentSpec() {
+  if (!tpl) return { head: [$('qCompany').value.trim() || '公司名稱', '估　價　單'], cols: withRoles(DEFAULT_COLS), notes: ['備註：本估價單有效期限 30 天。'], sign: true };
+  const s = { head: tpl.spec.head.map(fillInfo), cols: tpl.spec.cols.map(c => ({ ...c })), notes: tpl.spec.notes.map(fillInfo), sign: false };
+  if (!s.head.length) s.head.push('公司名稱');
+  if (!s.head.some(l => /估價|報價|請款|訂購/.test(flat(l)))) s.head.splice(1, 0, '估　價　單');
+  if (!s.cols.length) s.cols = withRoles(DEFAULT_COLS);
+  ensureCols(s.cols);
+  if (!s.notes.length) { s.notes = ['備註：本估價單有效期限 30 天。']; s.sign = true; }
+  return s;
+}
+function infoParts(spec) {
+  return {
+    client: spec.head.some(l => CLIENT_LABEL.test(l)) ? null : '客戶：' + $('qClient').value.trim(),
+    date: spec.head.some(l => DATE_LABEL.test(l)) ? null : '日期：' + todayStr('/'),
+  };
+}
+const isTitleLine = l => /估價|報價|請款|訂購/.test(flat(l)) && flat(l).length <= 14;
+
+// ---------- 函式庫：用到時才載入 ----------
+const PDF_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const LIBS = {
+  pptx: ['https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js', () => window.PptxGenJS],
+  docx: ['https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js', () => window.docx],
+  jszip: ['https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js', () => window.JSZip],
+  pdf: ['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', () => window.pdfjsLib],
+};
+function loadLib(k) {
+  const [src, get] = LIBS[k];
+  if (get()) return Promise.resolve(get());
+  return new Promise((ok, bad) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = () => ok(get()); s.onerror = () => bad(new Error('網路連不上，請稍後再試'));
+    document.head.appendChild(s);
+  });
+}
+
+// ---------- 圖片 ----------
+// 新選的圖片加在原本的後面，已經有的（同檔名、同大小）不重複加
+function addImages(list) {
+  const key = f => f.name + '|' + f.size;
+  const seen = new Set(images.map(i => key(i.file)));
+  const pics = list.filter(f => IMG_EXT.test(f.name));
+  const fresh = pics.filter(f => !seen.has(key(f)) && seen.add(key(f))).sort(byName); // 同一批依檔名排，接在原本的後面
+  images = images.concat(fresh.map(f => ({ file: f, name: f.name, url: URL.createObjectURL(f), label: itemName(f.name) })));
+  const notes = [];
+  if (list.length > pics.length) notes.push(`略過 ${list.length - pics.length} 個非圖片檔`);
+  if (pics.length > fresh.length) notes.push(`${pics.length - fresh.length} 張已經加過`);
+  showImgCount(fresh.length, notes);
+  aiRun++; setAiMsg('');
+  refresh();
+  if (sampler && $('aiOn').checked) runAI();
+}
+function clearImages() {
+  images.forEach(i => URL.revokeObjectURL(i.url));
+  images = [];
+  aiRun++; setAiMsg('');
+  showImgCount(0, []);
+  refresh();
+}
+function showImgCount(added, notes) {
+  const n = images.length;
+  $('imgName').innerHTML = n
+    ? `✓ 共 ${n} 張圖片` + (added && added < n ? `（這次加入 ${added} 張）` : '') + (notes.length ? `<span class="muted">　${notes.join('，')}</span>` : '')
+      + ` <button type="button" class="link" id="imgClear">清除全部圖片</button>`
+    : (notes.length ? '沒有加入新的圖片：' + notes.join('，') : '');
+  if (n) $('imgClear').onclick = clearImages;
+  $('s2').classList.toggle('done', n > 0);
+}
+
+// ---------- AI 看圖取品名 ----------
+let sampler = null, aiMax = 1, aiRun = 0;
+function setAiMsg(t, err) { $('aiMsg').textContent = t; $('aiMsg').classList.toggle('err', !!err); }
+if (window.claude?.use) window.claude.use('sample').then(async s => {
+  const lim = s && await s.limits().catch(() => null);
+  if (!lim?.images) return;
+  sampler = s; aiMax = Math.max(1, Math.min(lim.images.maxCount || 1, 8));
+  $('aiField').hidden = false;
+  $('subName').textContent = 'AI 會看圖片取好品名';
+  if (tpl?.kind === 'xlsx' && !tpl.spec.map) aiMapColumns();
+  if (images.length && $('aiOn').checked) runAI();
+}).catch(() => {});
+
+// 縮成 1024 像素的 JPEG 再送，比較快
+async function aiBlob(file) {
+  const bmp = await loadBitmap(file);
+  const k = Math.min(1, 1024 / Math.max(bmp.width, bmp.height));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+  const g = cv.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height);
+  g.drawImage(bmp, 0, 0, cv.width, cv.height);
+  return new Promise(r => cv.toBlob(r, 'image/jpeg', 0.85));
+}
+const aiPrompt = batch => `你會看到 ${batch.length} 張圖片，是要放進估價單的品項照片（家具、燈具、建材、設備、商品等）。
+請依圖片順序，各取一個簡短的繁體中文品名，2 到 12 個字，例如「三人座布沙發」「實木餐桌」「黃銅吊燈」。看得出來的材質、顏色或款式可以加進去，不要加品牌或價格。
+一張圖片裡有好幾樣東西時（例如整個客廳），只取畫面中最大、或最靠近中間的那一樣的名稱。
+這些圖片的檔名依序是：${batch.map(i => i.name).join('、')}。檔名本身是有意義的品名或型號時，沿用檔名的名稱。
+另外判斷每一樣東西通常放在哪個空間，只能從這些選：${ROOMS.join('、')}。
+只回一個 JSON 陣列，長度剛好 ${batch.length}，每一項是 {"name": 品名, "room": 空間}，例如 [{"name":"北歐布沙發","room":"客廳"},{"name":"實木餐桌","room":"餐廳"}]。`;
+const AI_STOP = ['not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed', 'images_unavailable'];
+const AI_ERR = { rate_limited: 'AI 用量暫時到上限，稍後再勾一次「用 AI 看圖片取品名」。', session_expired: '請重新登入 Claude 後再試。', image_rejected: '有圖片 AI 讀不了，品名先用檔名。' };
+
+async function runAI() {
+  if (!sampler || !images.length) return;
+  const run = ++aiRun;
+  const list = quoteItems().filter(i => !i.edited && !i.aiDone); // 已經取好名的不再重跑
+  if (!list.length) return;
+  list.forEach(i => i.ai = true);
+  updateNames();
+  let done = 0;
+  for (let k = 0; k < list.length; k += aiMax) {
+    const batch = list.slice(k, k + aiMax);
+    setAiMsg(`AI 看圖取名中… ${done} / ${list.length}`);
+    try {
+      const blobs = await Promise.all(batch.map(i => aiBlob(i.file)));
+      const names = await sampler.json(aiPrompt(batch), { images: blobs, modelTier: 'quick' });
+      if (run !== aiRun) return;
+      batch.forEach((img, j) => {
+        const v = Array.isArray(names) ? names[j] : null;
+        const n = String((v && typeof v === 'object' ? v.name : v) ?? '').trim().slice(0, 30);
+        if (n && !img.edited) img.label = n;
+        if (v && ROOMS.includes(v.room) && !img.roomEdited) img.room = v.room;
+        img.ai = false; img.aiDone = true;
+      });
+      done += batch.length;
+      updateNames();
+    } catch (e) {
+      if (run !== aiRun) return;
+      list.forEach(i => i.ai = false);
+      updateNames();
+      if (AI_STOP.includes(e?.code)) { sampler = null; $('aiField').hidden = true; setAiMsg(''); }
+      else setAiMsg(AI_ERR[e?.code] || 'AI 取名沒有完成，品名先用檔名，可以直接修改。', true);
+      return;
+    }
+  }
+  setAiMsg(`✓ AI 取好 ${done} 個品名，可以在右邊直接修改`);
+}
+
+function loadBitmap(file) {
+  if (window.createImageBitmap) return createImageBitmap(file);
+  return new Promise((ok, bad) => { const im = new Image(); im.onload = () => ok(im); im.onerror = bad; im.src = URL.createObjectURL(file); });
+}
+// 高度 H 像素；有給 maxW 時寬度也不超過
+async function prepImage(file, H, maxW = Infinity) {
+  const bmp = await loadBitmap(file);
+  const ratio = bmp.width / bmp.height;
+  let w = H * ratio, h = H;
+  if (w > maxW) { w = maxW; h = maxW / ratio; }
+  w = Math.max(1, Math.round(w)); h = Math.max(1, Math.round(h));
+  // 存成顯示大小的 2 倍，清楚又不會讓檔案太大
+  const k = Math.min(2, bmp.width / w);
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(w * k); cv.height = Math.round(h * k);
+  const g = cv.getContext('2d');
+  const png = /\.(png|gif|webp)$/i.test(file.name);
+  if (!png) { g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); }
+  g.drawImage(bmp, 0, 0, cv.width, cv.height);
+  const blob = await new Promise(r => cv.toBlob(r, png ? 'image/png' : 'image/jpeg', 0.88));
+  return { buffer: await blob.arrayBuffer(), extension: png ? 'png' : 'jpeg', w, h };
+}
+async function prepAll(items, H) {
+  const out = [];
+  for (let i = 0; i < items.length; i++) {
+    showMsg(`處理圖片 ${i + 1} / ${items.length}…`);
+    try { out.push(await prepImage(items[i].file, H)); } catch { out.push(null); }
+  }
+  return out;
+}
+
+// ---------- 預覽 ----------
+function refresh() {
+  $('sample').hidden = images.length > 0;
+  $('go').disabled = !images.length;
+  const ph = name => `<figure><div class="ph"></div><figcaption>${name}</figcaption></figure>`;
+  if (!images.length) {
+    $('sum').innerHTML = '<span class="pill">3 個品項</span>';
+    $('rows').innerHTML = [[1, '北歐布沙發', '01_北歐布沙發.jpg'], [2, '實木餐桌', '02_實木餐桌.jpg'], [3, '吊燈', '03_吊燈.png']]
+      .map(([r, t, f]) => `<tr><td class="r">${r}</td><td>${t}</td><td><div class="thumbs">${ph(f)}</div></td></tr>`).join('');
+    return;
+  }
+  const items = quoteItems();
+  const slots = tpl?.kind === 'xlsx' && $('qFmt').value === 'xlsx' ? tpl.spec.slots : Infinity;
+  $('sum').innerHTML = `<span class="pill">${items.length} 個品項</span>`
+    + (items.length > slots ? `<span class="pill">範本有 ${slots} 個位置，超過的會自動新增一頁</span>` : '');
+  $('rows').innerHTML = items.map((i, n) => `<tr><td class="r">${n + 1}</td><td><input type="text" class="nm" id="nm${n}" aria-label="第 ${n + 1} 項品名"><div class="ai-wait" hidden>AI 看圖中…</div><select class="rm" id="rm${n}" aria-label="第 ${n + 1} 項的空間" title="PPT 同空間的放同一頁">${ROOMS.map(r => `<option>${r}</option>`).join('')}</select></td><td><div class="thumbs"><figure><img src="${i.url}" alt=""><figcaption title="${esc(i.name)}">${esc(i.name)}</figcaption></figure></div></td></tr>`).join('');
+  items.forEach((img, n) => {
+    const box = $('nm' + n);
+    box.addEventListener('input', () => { img.label = box.value; img.edited = true; updateNames(); });
+    $('rm' + n).addEventListener('change', e => { img.room = e.target.value; img.roomEdited = true; });
+  });
+  updateNames();
+}
+// 只更新品名欄，正在打字的那格不動
+function updateNames() {
+  quoteItems().forEach((img, n) => {
+    const box = $('nm' + n);
+    if (!box) return;
+    if (document.activeElement !== box) box.value = img.label;
+    box.nextElementSibling.hidden = !img.ai;
+    const rm = $('rm' + n);
+    rm.hidden = $('qFmt').value !== 'pptx';
+    if (document.activeElement !== rm) rm.value = roomOf(img);
+  });
+}
+
+function renderOptions() {
+  const fmt = $('qFmt').value;
+  $('go').textContent = '下載 ' + $('qFmt').selectedOptions[0].text;
+  const xlsxTpl = tpl?.kind === 'xlsx' && fmt === 'xlsx';
+  $('sizeField').hidden = fmt === 'pptx' || xlsxTpl;
+  $('taxField').hidden = fmt === 'pptx' || xlsxTpl;
+  $('companyField').hidden = !!tpl;
+  $('tplPick').hidden = !!tpl;
+  const box = $('tplInfo');
+  box.hidden = !tpl;
+  if (images.length) refresh();
+  if (!tpl) return;
+  const s = tpl.spec, n = s.slides || 0;
+  const how = tpl.kind === fmt
+    ? (fmt === 'xlsx' ? `照範本原樣填進空白的品項位置，不改內容和格式、不加欄位；圖片縮放後放進${s.imgAt}。`
+      + (s.sheets ? `範本有 ${s.sheets.length} 張工作表（可放 ${s.sheets.map(x => x.cap).join('、')} 項），會自動選剛好放得下的那張；` : '')
+      + (s.slots === 0 ? '範本的品項列都已經有內容，會照最後一列的格式往下新增。' : '')
+      + (s.slots === Infinity || s.slots === 0 ? '' : `範本最多有 ${s.slots} 個品項位置，不夠時接著新增一頁，總金額和下面的匯款、約定事項放在最後一頁。`)
+      : n >= 3 ? '沿用這份簡報的設計：第 1 頁當封面，第 2 頁當每個品項的樣式，最後一頁保留'
+      : n === 2 ? '沿用這份簡報的設計：第 1 頁當封面，第 2 頁當每個品項的樣式'
+      : '沿用這份簡報的設計，每個品項一頁')
+    : fmt === 'pptx' ? '封面標題用範本的抬頭' : '照範本的抬頭、欄位和備註產生';
+  box.innerHTML = `<div class="tpl-name">✓ 範本：${esc(tpl.name)}${tpl.restored ? '<span class="muted">（上次用的，已自動載入）</span>' : ''}</div><div>${how}</div>`
+    + (s.head[0] ? `<div class="tpl-meta">抬頭：${esc(s.head[0])}</div>` : '')
+    + (tpl.kind === 'xlsx'
+      ? `<div class="tpl-meta">${tpl.aiBusy ? 'AI 判斷欄位中…' : (s.map ? 'AI 判斷的' : '') + '欄位用途：' + esc(s.cols.filter(c => ROLE_LABEL[c.role]).map(c => `${c.letter} ${c.name}→${roleLabel(c)}`).join('、'))}</div>`
+      : s.cols.length ? `<div class="tpl-meta">欄位：${esc(s.cols.map(c => c.name).join('、'))}</div>` : '')
+    + '<button type="button" class="link" id="tplDrop">不用範本</button>';
+  $('tplDrop').onclick = () => { tpl = null; $('tplFile').value = ''; Store.del('tpl'); renderOptions(); };
+}
+
+// ---------- 記住範本（存在這台電腦的瀏覽器裡） ----------
+const Store = {
+  db: null,
+  open() {
+    if (this.db) return this.db;
+    this.db = new Promise((ok, bad) => {
+      const r = indexedDB.open('quote-helper', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => ok(r.result);
+      r.onerror = () => bad(r.error);
+    });
+    return this.db;
+  },
+  async run(mode, fn) {
+    try {
+      const db = await this.open();
+      return await new Promise(ok => { const q = fn(db.transaction('kv', mode).objectStore('kv')); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); });
+    } catch { return null; }
+  },
+  get(k) { return this.run('readonly', s => s.get(k)); },
+  set(k, v) { return this.run('readwrite', s => s.put(v, k)); },
+  del(k) { return this.run('readwrite', s => s.delete(k)); },
+};
+function saveTpl() { if (tpl) Store.set('tpl', { kind: tpl.kind, name: tpl.name, buf: tpl.buf, spec: tpl.spec }); }
+
+// ---------- 讀範本 ----------
+async function loadTemplate(file) {
+  const ext = (file.name.match(/\.([^.]+)$/) || [])[1]?.toLowerCase();
+  showMsg('讀取範本…');
+  try {
+    const buf = await file.arrayBuffer();
+    let kind, spec;
+    if (ext === 'xlsx' || ext === 'xlsm') { kind = 'xlsx'; spec = await specFromXlsx(buf); }
+    else if (ext === 'pdf') { kind = 'pdf'; spec = await specFromPdf(buf); }
+    else if (ext === 'pptx') { kind = 'pptx'; spec = await specFromPptx(buf); }
+    else throw new Error('範本只能用 Excel（.xlsx）、PDF 或 PPT（.pptx）。舊的 .xls、.ppt 請先另存新檔。');
+    tpl = { kind, name: file.name, buf, spec };
+    saveTpl();
+    if (kind === 'xlsx' || kind === 'pptx') $('qFmt').value = kind;
+    else if ($('qFmt').value === 'pptx') $('qFmt').value = 'xlsx';
+    showMsg('');
+    if (kind === 'xlsx') aiMapColumns();
+  } catch (e) {
+    tpl = null;
+    showMsg(e.message, true);
+  }
+  $('tplFile').value = '';
+  renderOptions();
+}
+
+// Excel：找出表格標題列（例如「項次、品名、數量、單價、金額」）和合計列
+function masterCells(ws, r) {
+  const out = [];
+  ws.getRow(r).eachCell({ includeEmpty: false }, (cell, col) => {
+    if (cell.isMerged && cell.master.address !== cell.address) return;
+    const text = cellText(cell).trim();
+    if (text) out.push({ col, text, cell });
+  });
+  return out;
+}
+const mergeSpan = (ws, cell) => { const m = ws._merges[cell.address]; return m ? m.right - m.left + 1 : 1; };
+// 品項列裡某一欄已有的內容（合併格只算一次）
+function colValues(ws, col, rows) {
+  return rows.map(k => { const c = ws.getCell(k, col); return c.isMerged && c.master.row !== k ? '' : cellText(c.master).trim(); }).filter(Boolean);
+}
+const isSeq = v => v.length >= 2 && v.every(x => /^\d+$/.test(x)) && v.every((x, i) => i === 0 || +x === +v[i - 1] + 1);
+const AI_ROLES = ['index', 'name', 'name_image', 'image', 'qty', 'unit', 'price', 'amount'];
+
+// map：AI 判斷的欄位用途，例如 {A:'index', B:'name', C:'image'}，有的話以它為準
+function findTable(wb, map) {
+  for (const ws of wb.worksheets) {
+    if (ws.state && ws.state !== 'visible') continue;
+    const t = findTableIn(ws, map);
+    if (t) return t;
+  }
+  return null;
+}
+function findTableIn(ws, map) {
+  {
+    for (let r = 1; r <= Math.min(ws.rowCount, 80); r++) {
+      const cells = masterCells(ws, r);
+      if (!isHeader(cells.map(c => c.text))) continue;
+      let tot = null, totEnd = null;
+      for (let k = r + 1; k <= ws.rowCount; k++) {
+        if (TOTAL_RE.test(masterCells(ws, k).map(c => c.text).join(' '))) { tot = tot || k; totEnd = k; }
+        else if (tot) break;
+      }
+      const sampleRows = range(r + 1, tot ? tot - 1 : Math.min(ws.rowCount, r + 30));
+      const hints = cells.map(c => isSeq(colValues(ws, c.col, sampleRows)) ? 'index' : null);
+      const roles = withRoles(cells.map(c => c.text), hints);
+      const cols = cells.map((c, i) => ({ col: c.col, span: mergeSpan(ws, c.cell), name: c.text.replace(/\s+/g, ' '), role: roles[i].role, alsoImage: !!roles[i].alsoImage }));
+      const minCol = cols[0].col, maxCol = Math.max(...cols.map(c => c.col + c.span - 1));
+      const covered = () => new Set(cols.flatMap(c => range(c.col, c.col + c.span - 1)));
+
+      if (map) {
+        cols.forEach(c => {
+          const m = map[colLetter(c.col)];
+          if (!m) return;
+          c.alsoImage = m === 'name_image';
+          c.role = c.alsoImage ? 'name' : AI_ROLES.includes(m) ? m : 'other';
+        });
+        // AI 指定的品名欄或圖片欄如果標題是空白的，也加進來
+        for (const [letter, role] of Object.entries(map)) {
+          const k = colNum(letter);
+          if (['name', 'image'].includes(role) && k >= minCol && k <= maxCol && !covered().has(k)) cols.push({ col: k, span: 1, name: '', role });
+        }
+        const seen = new Set();
+        cols.forEach(c => { if (c.role !== 'other' && seen.has(c.role)) c.role = 'other'; seen.add(c.role); });
+      }
+      // 還是沒有品名欄：用最寬的一般欄，或標題空白的欄
+      if (!cols.some(c => c.role === 'name')) {
+        const wide = c => range(c.col, c.col + c.span - 1).reduce((a, k) => a + colPx(ws, k), 0);
+        const cand = cols.filter(c => c.role === 'other' && !/備註|規格|尺寸|樣式|單位/.test(flat(c.name))).sort((a, b) => wide(b) - wide(a))[0];
+        const blank = range(minCol, maxCol).find(k => !covered().has(k));
+        if (cand) cand.role = 'name';
+        else if (blank) cols.push({ col: blank, span: 1, name: '', role: 'name' });
+      }
+      // 沒有明寫圖片欄時看格子結構：品名格下面、同一個品項裡還有一塊空的合併格，就是放圖片的地方
+      // （例如品名 B6:C6、下面 B7:C13 合併，標題寫「名稱及規格」也一樣）
+      const nameC = cols.find(c => c.role === 'name');
+      const keyC = cols.find(c => c.role === 'index') || cols.find(c => c.role === 'qty') || cols.find(c => c.role === 'amount');
+      if (nameC && keyC && !nameC.alsoImage && !cols.some(c => c.role === 'image')) {
+        const r0 = r + 1, km = ws._merges[ws.getCell(r0, keyC.col).master.address], nm = ws._merges[ws.getCell(r0, nameC.col).master.address];
+        const bb = km ? km.bottom : r0, nb = nm ? nm.bottom : r0;
+        if (bb > nb && isBlank(ws.getCell(nb + 1, nameC.col))) nameC.alsoImage = true;
+      }
+      cols.sort((a, b) => a.col - b.col);
+      return { ws, h: r, cols, minCol, maxCol, tot, totEnd };
+    }
+  }
+  return null;
+}
+const colNum = s => [...s.replace(/\$/g, '')].reduce((a, ch) => a * 26 + ch.charCodeAt(0) - 64, 0);
+const colTitle = c => c.name || `${colLetter(c.col)} 欄`;
+
+// AI 看範本每一欄的標題和已有的內容，判斷要填什麼
+async function aiMapColumns() {
+  if (!sampler || tpl?.kind !== 'xlsx' || tpl.aiBusy) return;
+  const mine = tpl;
+  mine.aiBusy = true; renderOptions();
+  try {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(mine.buf.slice(0));
+    const t = findTable(wb);
+    if (!t) return;
+    const ws = t.ws, rows = range(t.h + 1, t.tot ? t.tot - 1 : Math.min(ws.rowCount, t.h + 15));
+    const lines = range(t.minCol, t.maxCol).filter(c => { const h = ws.getCell(t.h, c); return !h.isMerged || h.master.col === c; }).map(c => {
+      const head = cellText(ws.getCell(t.h, c).master).trim();
+      const vals = colValues(ws, c, rows).slice(0, 4);
+      // 這一欄在第一個品項裡怎麼合併（例如品名一格、下面三格合併放圖）
+      const shape = [];
+      for (let k = t.h + 1, n = 0; k <= Math.min(rows[rows.length - 1] || t.h, t.h + 12) && n < 3; n++) {
+        const m = ws._merges[ws.getCell(k, c).master.address];
+        const b = m ? m.bottom : k;
+        shape.push(b > k ? `第 ${k}～${b} 列合併` : `第 ${k} 列`);
+        k = b + 1;
+      }
+      return `${colLetter(c)} 欄：標題「${head || '（空白）'}」，寬約 ${colPx(ws, c)} 像素，格子：${shape.join('、')}，範本裡已有的內容：${vals.length ? vals.join('、') : '（空白）'}`;
+    });
+    const map = await sampler.json(`這是一份 Excel 估價單範本的表格（標題列在第 ${t.h} 列），一個品項可能佔一列，也可能佔好幾列。請判斷每一欄是用來填什麼。
+${lines.join('\n')}
+
+用途只能是：index（項次編號）、name（品項名稱）、name_image（同一欄上面寫品名、下面放圖片，例如標題「名稱及圖片」）、image（放產品圖片）、qty（數量）、unit（單位）、price（單價）、amount（金額＝數量×單價）、other（其他，例如規格、備註）。
+判斷原則：範本裡已經填好 1、2、3 這種連號的欄是 index，不是品名。標題寫「項目」但內容是編號，就是 index。標題同時有名稱和圖片，或品名格下面接著一塊合併的大格子，就是 name_image。備註欄不放圖片。標題空白但很寬的欄，通常是放圖片或品名。每種用途最多一欄，一定要有 name 或 name_image。
+只回 JSON 物件，鍵是欄號，值是用途，例如 {"A":"index","B":"name_image","C":"qty","D":"price","E":"amount","F":"other"}。`, { modelTier: 'quick' });
+    if (tpl !== mine || !map || typeof map !== 'object') return;
+    const clean = {};
+    for (const [k, v] of Object.entries(map)) if (/^[A-Z]{1,3}$/.test(k)) clean[k] = AI_ROLES.includes(v) ? v : 'other';
+    if (!Object.values(clean).some(v => v === 'name' || v === 'name_image')) return;
+    mine.spec = await specFromXlsx(mine.buf, clean);
+    mine.spec.map = clean;
+    if (tpl === mine) saveTpl();
+  } catch { /* AI 判斷不了就用原本的判斷 */ }
+  finally { mine.aiBusy = false; if (tpl === mine) renderOptions(); }
+}
+async function specFromXlsx(buf, map) {
+  const wb = new ExcelJS.Workbook();
+  try { await wb.xlsx.load(buf.slice(0)); } catch { throw new Error('這個 Excel 範本打不開，可能有密碼保護或檔案損毀。'); }
+  const t = findTable(wb, map);
+  if (!t) throw new Error('Excel 範本裡找不到表格的標題列，標題列要有「品名」「數量」「單價」這類欄位名稱。');
+  const line = r => masterCells(t.ws, r).map(c => c.text).join('　');
+  const head = range(1, t.h - 1).map(line).filter(Boolean);
+  const notes = t.totEnd ? range(t.totEnd + 1, t.ws.rowCount).map(line).filter(Boolean) : [];
+  const ir = itemRows(t.ws, t);
+  const { list } = pickSheet(wb, map, 0);
+  return {
+    head, notes, slots: list.length > 1 ? Math.max(...list.map(s => s.cap)) : ir.open ? Infinity : ir.rows.length, imgAt: pickImageCol(t).why,
+    sheets: list.length > 1 ? list.map(s => ({ name: s.ws.name, cap: s.cap })) : null,
+    cols: t.cols.map(c => ({ name: c.name || ROLE_LABEL[c.role] || '', role: c.role, alsoImage: c.alsoImage, letter: colLetter(c.col) })),
+  };
+}
+
+// PDF：讀出每一行文字，找標題列，上面是抬頭、合計下面是備註
+async function specFromPdf(buf) {
+  const pdfjs = await loadLib('pdf');
+  pdfjs.GlobalWorkerOptions.workerSrc = PDF_WORKER;
+  let pdf;
+  try { pdf = await pdfjs.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise; }
+  catch { throw new Error('這個 PDF 打不開，可能有密碼保護或檔案損毀。'); }
+  const lines = [];
+  for (let n = 1; n <= Math.min(pdf.numPages, 3); n++) {
+    const tc = await (await pdf.getPage(n)).getTextContent();
+    const its = tc.items.filter(i => i.str && i.str.trim()).map(i => ({ x: i.transform[4], y: i.transform[5], w: i.width, s: i.str }));
+    its.sort((a, b) => b.y - a.y || a.x - b.x);
+    let cur = null;
+    for (const it of its) {
+      if (!cur || Math.abs(cur.y - it.y) > 3) { cur = { y: it.y, items: [] }; lines.push(cur); }
+      cur.items.push(it);
+    }
+  }
+  const cellsOf = line => {
+    const out = [];
+    for (const it of line.items.sort((a, b) => a.x - b.x)) {
+      const last = out[out.length - 1];
+      if (last && it.x - (last.x + last.w) < 6) { last.s += it.s; last.w = it.x + it.w - last.x; }
+      else out.push({ ...it });
+    }
+    return out.flatMap(c => c.s.split(/\s{2,}|　+/)).map(s => s.trim()).filter(Boolean);
+  };
+  const L = lines.map(cellsOf).filter(c => c.length);
+  if (!L.length) throw new Error('這個 PDF 讀不到文字（可能是掃描的圖片），請改用 Excel 範本。');
+  const text = c => c.join('　');
+  const h = L.findIndex(isHeader);
+  if (h < 0) return { head: L.slice(0, 6).map(text), cols: [], notes: [] };
+  let totEnd = -1;
+  for (let k = h + 1, started = false; k < L.length; k++) {
+    if (TOTAL_RE.test(text(L[k]))) { started = true; totEnd = k; } else if (started) break;
+  }
+  return { head: L.slice(0, h).map(text), cols: withRoles(L[h]), notes: totEnd >= 0 ? L.slice(totEnd + 1).map(text) : [] };
+}
+
+// PPT：封面的文字當抬頭
+const NS = { p: 'http://schemas.openxmlformats.org/presentationml/2006/main', a: 'http://schemas.openxmlformats.org/drawingml/2006/main', r: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships' };
+const REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
+const CT_NS = 'http://schemas.openxmlformats.org/package/2006/content-types';
+const REL_T = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/';
+const parseXml = s => new DOMParser().parseFromString(s, 'application/xml');
+const xmlStr = d => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + new XMLSerializer().serializeToString(d).replace(/^<\?xml[^>]*\?>\s*/, '');
+const relsPath = p => p.replace(/([^/]+)$/, '_rels/$1.rels');
+const relsOf = doc => [...doc.getElementsByTagNameNS(REL_NS, 'Relationship')];
+const aEls = (node, tag) => [...node.getElementsByTagNameNS(NS.a, tag)];
+function resolvePath(base, target) {
+  if (target.startsWith('/')) return target.slice(1);
+  const parts = base.split('/').slice(0, -1);
+  for (const seg of target.split('/')) { if (seg === '..') parts.pop(); else if (seg !== '.') parts.push(seg); }
+  return parts.join('/');
+}
+async function slideOrder(zip) {
+  const pres = parseXml(await zip.file('ppt/presentation.xml').async('string'));
+  const presRels = parseXml(await zip.file('ppt/_rels/presentation.xml.rels').async('string'));
+  const lst = pres.getElementsByTagNameNS(NS.p, 'sldIdLst')[0];
+  const slides = lst ? [...lst.getElementsByTagNameNS(NS.p, 'sldId')].map(el => {
+    const rid = el.getAttributeNS(NS.r, 'id');
+    const rel = relsOf(presRels).find(x => x.getAttribute('Id') === rid);
+    return { el, rel, path: resolvePath('ppt/presentation.xml', rel.getAttribute('Target')) };
+  }) : [];
+  return { pres, presRels, lst, slides };
+}
+async function specFromPptx(buf) {
+  const JSZip = await loadLib('jszip');
+  let zip;
+  try { zip = await JSZip.loadAsync(buf.slice(0)); } catch { throw new Error('這個 PPT 範本打不開，可能有密碼保護或檔案損毀。'); }
+  if (!zip.file('ppt/presentation.xml')) throw new Error('這個檔案不是 PPT 簡報。');
+  const { slides } = await slideOrder(zip);
+  if (!slides.length) throw new Error('這個 PPT 範本沒有投影片。');
+  const doc = parseXml(await zip.file(slides[0].path).async('string'));
+  const paras = aEls(doc, 'p').map(p => aEls(p, 't').map(t => t.textContent).join('').trim()).filter(Boolean);
+  return { head: paras.slice(0, 1), cols: [], notes: [], slides: slides.length };
+}
+
+// ---------- 產生 Excel ----------
+// 欄寬單位是字元，約 7 像素一個，多留一格免得圖片超出
+const pxToChars = px => Math.ceil(px / 7) + 1;
+const colPx = (ws, c) => Math.round((ws.getColumn(c).width || ws.properties.defaultColWidth || 8.43) * 7 + 5);
+// 圖片的左上和右下都綁在格子裡，列印縮放時會跟著儲存格一起縮；格子是合併的也可以
+function placeAt(ws, col, span, row, w, h) {
+  const widths = range(col, col + span - 1).map(c => colPx(ws, c));
+  const total = widths.reduce((a, b) => a + b, 0);
+  const rowPx = (ws.getRow(row).height || 15) / 0.75;
+  const k = Math.min(1, (total - 4) / w, (rowPx - 4) / h);
+  w = Math.round(w * k); h = Math.round(h * k);
+  const x0 = (total - w) / 2, y = Math.max(0, Math.round((rowPx - h) / 2));
+  const locate = x => { let c = 0; while (c < widths.length - 1 && x > widths[c]) { x -= widths[c]; c++; } return [col - 1 + c, Math.round(x)]; };
+  const [tc, tx] = locate(x0), [bc, bx] = locate(x0 + w);
+  return {
+    tl: { nativeCol: tc, nativeColOff: tx * EMU, nativeRow: row - 1, nativeRowOff: y * EMU },
+    br: { nativeCol: bc, nativeColOff: bx * EMU, nativeRow: row - 1, nativeRowOff: (y + h) * EMU },
+  };
+}
+
+async function buildXlsx() {
+  if (tpl?.kind === 'xlsx') return fillXlsxTemplate();
+  const spec = currentSpec();
+  const H = +$('size').value, PAD = 6, tax = $('qTax').value === '1';
+  const wb = new ExcelJS.Workbook();
+  wb.calcProperties.fullCalcOnLoad = true; // 打開時算出金額
+  const ws = wb.addWorksheet('估價單', { pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: .4, right: .4, top: .5, bottom: .5, header: .3, footer: .3 } } });
+  const thin = { style: 'thin', color: { argb: 'FF9AA5A0' } };
+  const box = { top: thin, left: thin, bottom: thin, right: thin };
+  const money = '#,##0';
+  const items = quoteItems(), prepared = await prepAll(items, H);
+  const imgW = Math.max(H, ...prepared.filter(Boolean).map(p => p.w)) + PAD * 2;
+
+  const cols = spec.cols, N = cols.length;
+  const at = role => cols.findIndex(c => c.role === role) + 1;
+  const cImg = at('image'), cQty = at('qty'), cPrice = at('price'), cAmt = at('amount');
+  const L = colLetter;
+  const COL_W = { index: 6, name: 24, qty: 7, unit: 6, price: 11, amount: 13, other: 14 };
+  cols.forEach((c, i) => ws.getColumn(i + 1).width = c.role === 'image' ? pxToChars(imgW) : COL_W[c.role]);
+  const mergeRow = (r, a, b) => { if (b > a) ws.mergeCells(r, a, r, b); };
+  const totalChars = cols.reduce((a, c, i) => a + ws.getColumn(i + 1).width, 0);
+  const wrapHeight = text => 15 * Math.max(1, Math.ceil(String(text).length * 2 / totalChars));
+
+  let r = 1;
+  spec.head.forEach((line, i) => {
+    const big = i === 0 && !isTitleLine(line), title = isTitleLine(line);
+    mergeRow(r, 1, N);
+    Object.assign(ws.getCell(r, 1), { value: line, font: { size: big ? 18 : title ? 15 : 11, bold: big || title }, alignment: { horizontal: big || title ? 'center' : 'left', vertical: 'middle', wrapText: true } });
+    ws.getRow(r).height = big ? 30 : title ? 24 : wrapHeight(line);
+    r++;
+  });
+  const info = infoParts(spec);
+  if (info.client || info.date) {
+    const mid = Math.max(1, Math.ceil(N / 2));
+    if (info.client) { mergeRow(r, 1, mid); ws.getCell(r, 1).value = info.client; }
+    if (info.date) {
+      const c0 = info.client ? mid + 1 : 1;
+      if (c0 <= N) { mergeRow(r, c0, N); Object.assign(ws.getCell(r, c0), { value: info.date, alignment: { horizontal: 'right' } }); }
+    }
+    r++;
+  }
+  r++;
+
+  const hr = r;
+  cols.forEach((c, i) => Object.assign(ws.getCell(hr, i + 1), { value: c.name, font: { bold: true }, alignment: { horizontal: 'center', vertical: 'middle', wrapText: true }, border: box, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE3F1E8' } } }));
+  ws.getRow(hr).height = 22;
+
+  const first = hr + 1, rowPt = (H + PAD * 2) * 0.75;
+  items.forEach((img, i) => {
+    const rr = first + i, row = ws.getRow(rr);
+    row.height = rowPt;
+    cols.forEach((c, j) => {
+      const cell = row.getCell(j + 1);
+      cell.value = c.role === 'index' ? i + 1 : c.role === 'name' ? labelOf(img) : c.role === 'qty' ? 1
+        : c.role === 'unit' && !tpl ? '件'
+        : c.role === 'amount' && cQty && cPrice ? { formula: `IF(${L(cPrice)}${rr}="","",${L(cQty)}${rr}*${L(cPrice)}${rr})` } : null;
+      cell.border = box;
+      cell.alignment = { vertical: 'middle', horizontal: ['index', 'qty', 'unit'].includes(c.role) ? 'center' : ['price', 'amount'].includes(c.role) ? 'right' : 'left', wrapText: true };
+      if (c.role === 'price' || c.role === 'amount') cell.numFmt = money;
+    });
+    const p = prepared[i];
+    if (p) ws.addImage(wb.addImage({ buffer: p.buffer, extension: p.extension }), placeAt(ws, cImg, 1, rr, p.w, p.h));
+  });
+
+  const last = first + items.length - 1;
+  r = last + 1;
+  if (cAmt > 1) {
+    const A = L(cAmt);
+    const totalRow = (label, formula, bold) => {
+      mergeRow(r, 1, cAmt - 1);
+      Object.assign(ws.getCell(r, 1), { value: label, alignment: { horizontal: 'right' }, font: { bold } });
+      Object.assign(ws.getCell(r, cAmt), { value: { formula }, numFmt: money, font: { bold }, alignment: { horizontal: 'right' } });
+      mergeRow(r, cAmt + 1, N);
+      for (let c = 1; c <= N; c++) ws.getCell(r, c).border = box;
+      return r++;
+    };
+    const sub = totalRow('小計', `SUM(${A}${first}:${A}${last})`);
+    if (tax) {
+      const t = totalRow('營業稅 5%', `ROUND(${A}${sub}*0.05,0)`);
+      totalRow('總計', `${A}${sub}+${A}${t}`, true);
+    } else totalRow('總計', `${A}${sub}`, true);
+  }
+
+  r++;
+  spec.notes.forEach(line => {
+    mergeRow(r, 1, N);
+    Object.assign(ws.getCell(r, 1), { value: line, alignment: { wrapText: true, vertical: 'top' } });
+    ws.getRow(r).height = wrapHeight(line);
+    r++;
+  });
+  if (spec.sign) {
+    r++;
+    const mid = Math.max(1, Math.ceil(N / 2));
+    mergeRow(r, 1, mid); ws.getCell(r, 1).value = '報價人：';
+    if (mid < N) { mergeRow(r, mid + 1, N); ws.getCell(r, mid + 1).value = '客戶簽名：'; }
+    r++;
+  }
+  ws.pageSetup.printArea = `A1:${L(N)}${r - 1}`;
+  ws.pageSetup.printTitlesRow = `${hr}:${hr}`;
+  return new Blob([await wb.xlsx.writeBuffer()], { type: XLSX_TYPE });
+}
+
+const isFormula = cell => cell.type === ExcelJS.ValueType.Formula;
+const isBlank = cell => { const v = cell.master.value; return v == null || (typeof v === 'string' && !v.trim()); };
+const sum = a => a.reduce((x, y) => x + y, 0);
+const rowPx = (ws, r) => (ws.getRow(r).height || ws.properties.defaultRowHeight || 15) / 0.75;
+// 某一格（含合併範圍）的位置和每欄寬、每列高（像素）
+function cellBox(ws, r, c) {
+  const m = ws._merges[ws.getCell(r, c).master.address];
+  const top = m ? m.top : r, left = m ? m.left : c, bottom = m ? m.bottom : r, right = m ? m.right : c;
+  return { top, left, widths: range(left, right).map(k => colPx(ws, k)), heights: range(top, bottom).map(k => rowPx(ws, k)) };
+}
+// 圖片放進這一格（置中，bottom 時貼底），左上和右下都綁在格子裡
+function anchorIn(box, w, h, valign) {
+  const locate = (v, sizes, start) => { let i = 0; while (i < sizes.length - 1 && v > sizes[i]) { v -= sizes[i]; i++; } return [start - 1 + i, Math.max(0, Math.round(v))]; };
+  const x0 = (sum(box.widths) - w) / 2, y0 = valign === 'bottom' ? sum(box.heights) - h - 4 : (sum(box.heights) - h) / 2;
+  const [tc, tx] = locate(x0, box.widths, box.left), [bc, bx] = locate(x0 + w, box.widths, box.left);
+  const [tr, ty] = locate(y0, box.heights, box.top), [br, by] = locate(y0 + h, box.heights, box.top);
+  return {
+    tl: { nativeCol: tc, nativeColOff: tx * EMU, nativeRow: tr, nativeRowOff: ty * EMU },
+    br: { nativeCol: bc, nativeColOff: bx * EMU, nativeRow: br, nativeRowOff: by * EMU },
+  };
+}
+
+// 範本裡圖片該放哪一欄：「圖片」欄 → 表格裡標題空白的欄 → 備註這類欄
+function pickImageCol(t) {
+  const img = t.cols.find(c => c.role === 'image');
+  if (img) return { col: img.col, why: img.name ? `「${img.name}」欄` : ` ${colLetter(img.col)} 欄` };
+  const ni = t.cols.find(c => c.role === 'name' && c.alsoImage);
+  if (ni) return { col: ni.col, why: `「${colTitle(ni)}」欄的品名下方`, underName: true };
+  const covered = new Set(t.cols.flatMap(c => range(c.col, c.col + c.span - 1)));
+  const blank = range(t.minCol, t.maxCol).find(c => !covered.has(c));
+  if (blank) return { col: blank, why: ` ${colLetter(blank)} 欄（標題空白的那欄）` };
+  const note = t.cols.find(c => c.role === 'other' && /備註|樣式|示意|規格|說明/.test(flat(c.name)));
+  const other = note || t.cols.filter(c => c.role === 'other').sort((a, b) => b.span - a.span)[0];
+  if (other) return { col: other.col, why: `「${other.name}」欄` };
+  const name = t.cols.find(c => c.role === 'name') || t.cols[0];
+  return { col: name.col, why: `「${colTitle(name)}」欄` };
+}
+
+// 範本裡可以放品項的位置。一個品項可能佔好幾列（例如項次 A6:A9 合併就是 4 列一組），
+// 以項次欄（沒有就用數量、金額欄）的合併範圍分組；品名還空著的組才放，已經有內容的不動
+function itemRows(ws, t) {
+  const nameCol = (t.cols.find(c => c.role === 'name') || t.cols[0]).col;
+  const keyCol = (t.cols.find(c => c.role === 'index') || t.cols.find(c => c.role === 'qty') || t.cols.find(c => c.role === 'amount') || { col: nameCol }).col;
+  const blockAt = r => { const m = ws._merges[ws.getCell(r, keyCol).master.address]; return m ? m.bottom : r; };
+  const blocksIn = (a, b) => { const out = []; for (let r = a; r <= b; r = Math.max(r, blockAt(r)) + 1) out.push({ top: r, bottom: Math.min(Math.max(r, blockAt(r)), b) }); return out; };
+  const free = k => isBlank(ws.getCell(k.top, nameCol));
+  const cells = r => range(t.minCol, t.maxCol).map(c => ws.getCell(r, c));
+  let end = t.h;
+  if (t.tot) end = t.tot - 1;
+  else {
+    // 沒有合計列：有框線的列算表格；完全沒有框線就往下用整列空白的列
+    const bordered = r => cells(r).some(c => Object.values(c.border || {}).some(Boolean));
+    while (end < t.h + 500 && bordered(end + 1)) end++;
+    if (end === t.h) {
+      const rows = [];
+      for (let r = t.h + 1; r <= t.h + 500 && cells(r).every(isBlank); r++) rows.push({ top: r, bottom: r });
+      return { rows, all: rows, open: true, nameCol };
+    }
+  }
+  let all = end > t.h ? blocksIn(t.h + 1, end) : [];
+  // 只算和一般品項一樣大小的組，頁與頁之間的空白分隔列不算
+  const size = b => b.bottom - b.top + 1, count = {};
+  all.forEach(b => count[size(b)] = (count[size(b)] || 0) + 1);
+  const common = +Object.keys(count).sort((a, b) => count[b] - count[a])[0];
+  if (common > 1) all = all.filter(b => size(b) === common);
+  return { rows: all.filter(free), all, open: false, end, nameCol };
+}
+
+// 公式裡第 L 列以下的參照往下移 n 列；範圍的結尾剛好在 L 也一起延長（合計才會算到新增的列）
+const REF_RE = /(?<![A-Za-z0-9_.!])(\$?[A-Z]{1,3}\$?)(\d+)(?::(\$?[A-Z]{1,3}\$?)(\d+))?(?![A-Za-z0-9_(])/g;
+const mapRefs = (f, fn) => String(f).split('"').map((seg, i) => i % 2 ? seg : seg.replace(REF_RE, fn)).join('"');
+function shiftRefs(f, L, n) {
+  return mapRefs(f, (m, c1, r1, c2, r2) => {
+    const a = c1 + (+r1 > L ? +r1 + n : r1);
+    return c2 === undefined ? a : a + ':' + c2 + (+r2 >= L ? +r2 + n : r2);
+  });
+}
+// 複製到下面第 d 列的公式：沒鎖定（沒有 $）的列號一起加 d，例如 E7*F7 → E8*F8
+function copyRefs(f, d) {
+  const mv = (c, r) => c + (c.endsWith('$') ? r : +r + d);
+  return mapRefs(f, (m, c1, r1, c2, r2) => mv(c1, r1) + (c2 === undefined ? '' : ':' + mv(c2, r2)));
+}
+// 在第 L 列下面新增 n 列，照 srcTop 開始、每 b 列一組的格式複製（框線、格式、列高、合併格、公式）
+function insertRows(ws, L, n, srcTop, b) {
+  ws.eachRow({ includeEmpty: true }, row => row.eachCell(cell => {
+    if (isFormula(cell) && (cell.value.sharedFormula || cell.value.shareType)) cell.value = { formula: cell.formula, result: cell.result };
+  }));
+  const merges = Object.values(ws._merges).map(m => ({ top: m.top, left: m.left, bottom: m.bottom, right: m.right }));
+  const below = merges.filter(m => m.top > L);
+  below.forEach(m => ws.unMergeCells(m.top, m.left, m.bottom, m.right));
+  const inBlock = merges.filter(m => m.top >= srcTop && m.bottom <= L);
+  const imgs = ws.getImages().filter(m => m.range?.tl && m.range.tl.nativeRow >= L);
+  ws.spliceRows(L + 1, 0, ...Array.from({ length: n }, () => []));
+  ws.eachRow({ includeEmpty: true }, row => row.eachCell(cell => {
+    if (isFormula(cell)) cell.value = { formula: shiftRefs(cell.formula, L, n), result: cell.result };
+  }));
+  below.forEach(m => ws.mergeCells(m.top + n, m.left, m.bottom + n, m.right));
+  for (let r = L + 1; r <= L + n; r++) {
+    const src = srcTop + (r - L - 1) % b, row = ws.getRow(r), from = ws.getRow(src);
+    row.height = from.height;
+    from.eachCell({ includeEmpty: true }, (c, col) => {
+      const cell = row.getCell(col);
+      cell.style = clone(c.style);
+      if (isFormula(c) && !(c.isMerged && c.master.address !== c.address)) cell.value = { formula: copyRefs(c.formula, r - src) };
+    });
+  }
+  for (let start = L + 1; start <= L + n; start += b) {
+    inBlock.forEach(m => ws.mergeCells(m.top - srcTop + start, m.left, m.bottom - srcTop + start, m.right));
+  }
+  imgs.forEach(m => { m.range.tl.nativeRow += n; if (m.range.br) m.range.br.nativeRow += n; });
+  if (ws.pageSetup.printArea) ws.pageSetup.printArea = shiftRefs(ws.pageSetup.printArea, L, n);
+}
+
+// 範本有好幾張工作表（例如依品項數量做好的不同版本）：選剛好放得下的那張，都不夠就選最大的
+function pickSheet(wb, map, n) {
+  const list = wb.worksheets.filter(s => !s.state || s.state === 'visible').map(s => {
+    const t = findTableIn(s, map);
+    if (!t) return null;
+    const ir = itemRows(s, t);
+    return { ws: s, t, ir, cap: ir.open ? Infinity : ir.rows.length };
+  }).filter(Boolean);
+  const fit = list.filter(s => s.cap >= n).sort((a, b) => a.cap - b.cap)[0];
+  return { pick: fit || [...list].sort((a, b) => b.cap - a.cap)[0], list };
+}
+
+let fillNote = '';
+async function fillXlsxTemplate() {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(tpl.buf.slice(0));
+  wb.calcProperties.fullCalcOnLoad = true;
+  const map = tpl.spec.map, all = quoteItems();
+  const { pick, list } = pickSheet(wb, map, all.length);
+  const t0 = pick.t, ws = t0.ws, ir0 = pick.ir, per = ir0.rows.length;
+  fillNote = '';
+  if (list.length > 1) {
+    // 打開檔案時直接顯示用到的那張，其他工作表不動
+    const idx = wb.worksheets.indexOf(ws);
+    wb.views = [{ ...((wb.views || [])[0] || {}), activeTab: idx, firstSheet: 0 }];
+    wb.worksheets.forEach(s => { s.views = (s.views && s.views.length ? s.views : [{}]).map(v => ({ ...v, tabSelected: s === ws })); });
+    fillNote = `用「${ws.name}」這張工作表。`;
+  }
+  // 每一頁的品項位置往下移幾列，第 1 頁就是範本本身
+  const shifts = [0];
+  if (all.length > per && !ir0.open && per > 0) {
+    // 品項比範本多：在範本的品項區後面接著新增一頁品項格（中間分頁），
+    // 總金額、匯款資料、約定事項整段往下移，只在最後一頁出現；總金額公式的加總範圍會自動延伸到新的品項
+    const pages = Math.ceil(all.length / per), top = t0.h + 1, end = ir0.end, H = end - top + 1;
+    insertRows(ws, end, H * (pages - 1), top, H);
+    for (let p = 1; p < pages; p++) { ws.getRow(end + (p - 1) * H).addPageBreak(); shifts.push(p * H); }
+    // 每頁表格底線：範本原本靠總計列的上框線收尾，總計移到最後一頁後，前面幾頁照它補一條
+    const totRow = (t0.tot || end + 1) + H * (pages - 1);
+    for (let p = 1; p < pages; p++) for (let c = t0.minCol; c <= t0.maxCol; c++) {
+      const line = ws.getCell(totRow, c).border?.top || ws.getCell(end, c).border?.bottom || { style: 'thin' };
+      const cell = ws.getCell(end + (p - 1) * H, c);
+      cell.border = { ...(cell.border || {}), bottom: line };
+    }
+    // 範本沒設定每頁重複標題時，讓欄位標題列每頁都印出來
+    if (!ws.pageSetup.printTitlesRow) ws.pageSetup.printTitlesRow = `${t0.h}:${t0.h}`;
+    fillNote += `品項比範本多，已接著新增 ${pages - 1} 頁；總金額和下面的匯款、約定事項只放在最後一頁。`;
+  } else if (all.length > per && !ir0.open) {
+    // 範本裡沒有空的品項位置，只好照最後一組往下新增
+    const last = ir0.all[ir0.all.length - 1];
+    if (last) {
+      const b = last.bottom - last.top + 1, need = all.length - per;
+      insertRows(ws, ir0.end, need * b, last.top, b);
+    }
+  }
+
+  const t = findTableIn(ws, map);
+  let done = 0;
+  for (let si = 0; si < shifts.length; si++) {
+    let rows;
+    if (si > 0) rows = ir0.all.map(b => ({ top: b.top + shifts[si], bottom: b.bottom + shifts[si] }));
+    else if (per === 0 && !ir0.open) rows = itemRows(ws, t).all.slice(ir0.all.length); // 往下新增出來的那幾組
+    else rows = ir0.rows;
+    const chunk = all.slice(done, done + rows.length);
+    // 項次空白要自己編號時：接著範本已有的品項和前幾頁往下編
+    await fillBlocks(wb, ws, t, rows, chunk, ir0.all.length - per + done, done);
+    done += chunk.length;
+  }
+  if (done < all.length) fillNote = `範本只有 ${done} 個品項位置，後面 ${all.length - done} 項沒有放進去。`;
+  return new Blob([await wb.xlsx.writeBuffer()], { type: XLSX_TYPE });
+}
+
+// 把品項填進一張工作表的品項位置
+async function fillBlocks(wb, ws, t, rows, items, used, doneBefore) {
+  const L = colLetter, PAD = 4, total = quoteItems().length;
+  const ic = pickImageCol(t);
+  const at = role => t.cols.find(c => c.role === role)?.col;
+  const cIdx = at('index'), cName = at('name'), cQty = at('qty'), cPrice = at('price'), cAmt = at('amount');
+
+  for (let i = 0; i < items.length; i++) {
+    showMsg(`處理圖片 ${doneBefore + i + 1} / ${total}…`);
+    const blk = rows[i], r = blk.top, img = items[i];
+    // 只填空白的格子
+    const put = (c, v) => { if (!c) return; const cell = ws.getCell(r, c).master; if (isBlank(cell)) cell.value = v; };
+    put(cIdx, used + i + 1);
+    put(cName, labelOf(img));
+    put(cQty, 1);
+    if (cQty && cPrice) put(cAmt, { formula: `IF(${L(cPrice)}${r}="","",${L(cQty)}${r}*${L(cPrice)}${r})` });
+    // 圖片的格子：品名和圖片同一欄時，放在品名下面那塊合併格；整組只有一格就貼底，留上面給品名
+    let box, bottom = false;
+    if (ic.underName || ic.col === cName) {
+      const nm = ws._merges[ws.getCell(r, ic.col).master.address], nb = nm ? nm.bottom : r;
+      if (nb < blk.bottom) box = cellBox(ws, nb + 1, ic.col);
+      else { box = cellBox(ws, r, ic.col); bottom = true; }
+    } else {
+      box = cellBox(ws, r, ic.col);
+      if (!isBlank(ws.getCell(box.top, box.left))) continue; // 那格已經有內容，不蓋掉
+    }
+    // 圖片縮放到剛好放進格子，欄寬列高都不動；欄寬換算成像素只是估計，寬度多留一點
+    const maxW = sum(box.widths) * 0.92 - PAD * 2, maxH = sum(box.heights) * (bottom ? 0.68 : 1) - PAD * 2;
+    if (maxW < 4 || maxH < 4) continue;
+    try {
+      const p = await prepImage(img.file, maxH, maxW);
+      ws.addImage(wb.addImage({ buffer: p.buffer, extension: p.extension }), anchorIn(box, p.w, p.h, bottom ? 'bottom' : ''));
+    } catch {}
+  }
+
+  // 客戶、日期：只填在標籤旁邊空白的格子
+  const client = $('qClient').value.trim();
+  const infoRows = [...range(1, t.h - 1), ...(t.totEnd ? range(t.totEnd + 1, ws.rowCount) : [])];
+  for (const r of infoRows) for (const { col, cell, text } of masterCells(ws, r)) {
+    const f = flat(text).replace(/[:：]$/, '');
+    const kind = CLIENT_ONLY.test(f) ? 'client' : DATE_ONLY.test(f) ? 'date' : null;
+    if (!kind || (kind === 'client' && !client)) continue;
+    const next = ws.getCell(r, col + mergeSpan(ws, cell)).master;
+    if (isBlank(next)) next.value = kind === 'client' ? client : todayStr('/');
+  }
+}
+
+// ---------- 產生 PPT ----------
+const toDataURL = (buffer, ext) => new Promise(ok => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.readAsDataURL(new Blob([buffer], { type: 'image/' + ext })); });
+
+// 在 box 裡排 n 張圖，每張下面留一行品名；最後一排置中
+function gridCells(box, n, capH, gap) {
+  const cols = n <= 1 ? 1 : n === 2 ? 2 : n === 3 ? (box.w / box.h > 1.6 ? 3 : 2) : 2;
+  const rows = Math.ceil(n / cols);
+  const cw = (box.w - gap * (cols - 1)) / cols, rh = (box.h - gap * (rows - 1)) / rows;
+  return range(0, n - 1).map(i => {
+    const r = Math.floor(i / cols), c = i - r * cols, inRow = Math.min(cols, n - r * cols);
+    const x = box.x + (box.w - (inRow * cw + (inRow - 1) * gap)) / 2 + c * (cw + gap), y = box.y + r * (rh + gap);
+    return { x, y, w: cw, h: rh - capH, cap: { x, y: y + rh - capH, w: cw, h: capH } };
+  });
+}
+// 圖片等比例縮進格子，貼齊格子底部，品名才會排成一直線
+function fitBottom(cell, iw, ih) {
+  const k = Math.min(cell.w / iw, cell.h / ih), w = iw * k, h = ih * k;
+  return { x: cell.x + (cell.w - w) / 2, y: cell.y + cell.h - h, w, h };
+}
+
+async function buildPptx() {
+  if (tpl?.kind === 'pptx') return fillPptx();
+  const PptxGenJS = await loadLib('pptx');
+  const company = tpl ? currentSpec().head[0] : $('qCompany').value.trim(), client = $('qClient').value.trim();
+  const pres = new PptxGenJS();
+  pres.layout = 'LAYOUT_WIDE'; // 13.33 x 7.5 英吋
+  const FONT = 'Microsoft JhengHei', GREEN = '1F7A4D', INK = '1D2621', GREY = '5F6D65';
+  const items = quoteItems(), pages = roomPages(items);
+
+  const cover = pres.addSlide();
+  cover.background = { color: 'F3F5F2' };
+  cover.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: 0.35, h: 7.5, fill: { color: GREEN }, line: { color: GREEN } });
+  cover.addText(company || '產品提案', { x: 1, y: 2.3, w: 11.3, h: 1.2, fontFace: FONT, fontSize: 40, bold: true, color: INK });
+  cover.addText([client ? '提案對象：' + client : '', '日期：' + todayStr('/'), `共 ${items.length} 項`].filter(Boolean).join('　｜　'),
+    { x: 1, y: 3.6, w: 11.3, h: 0.6, fontFace: FONT, fontSize: 18, color: GREY });
+
+  let done = 0;
+  for (const pg of pages) {
+    const s = pres.addSlide();
+    s.background = { color: 'FFFFFF' };
+    s.addText(pg.title, { x: 0.6, y: 0.35, w: 12.13, h: 0.8, fontFace: FONT, fontSize: 28, bold: true, color: INK });
+    s.addShape(pres.ShapeType.line, { x: 0.6, y: 1.2, w: 12.13, h: 0, line: { color: GREEN, width: 2 } });
+    const cells = gridCells({ x: 0.6, y: 1.5, w: 12.13, h: 5.65 }, pg.items.length, 0.5, 0.35);
+    for (let j = 0; j < pg.items.length; j++) {
+      const img = pg.items[j];
+      showMsg(`處理圖片 ${++done} / ${items.length}…`);
+      try {
+        const p = await prepImage(img.file, 720);
+        s.addImage({ data: await toDataURL(p.buffer, p.extension), ...fitBottom(cells[j], p.w, p.h) });
+      } catch {}
+      s.addText(labelOf(img), { ...cells[j].cap, fontFace: FONT, fontSize: 16, color: INK, align: 'center', valign: 'top' });
+    }
+  }
+  // 產生 PPT 的套件會登記幾個不存在的母片，PowerPoint 可能因此要修復，先清掉
+  const JSZip = await loadLib('jszip');
+  const zip = await JSZip.loadAsync(await pres.write({ outputType: 'arraybuffer' }));
+  const ct = parseXml(await zip.file('[Content_Types].xml').async('string'));
+  [...ct.getElementsByTagNameNS(CT_NS, 'Override')].filter(o => !zip.file(o.getAttribute('PartName').slice(1))).forEach(o => o.remove());
+  zip.file('[Content_Types].xml', xmlStr(ct));
+  return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+}
+
+function xfrmOf(el) {
+  const x = el.getElementsByTagNameNS(NS.a, 'xfrm')[0];
+  const off = x && aEls(x, 'off')[0], ext = x && aEls(x, 'ext')[0];
+  if (!off || !ext) return null;
+  return { x: +off.getAttribute('x'), y: +off.getAttribute('y'), w: +ext.getAttribute('cx'), h: +ext.getAttribute('cy') };
+}
+const phType = el => { const ph = el.getElementsByTagNameNS(NS.p, 'ph')[0]; return ph ? (ph.getAttribute('type') || 'obj') : null; };
+
+// 投影片上最大的一塊空白（避開裝飾圖形、Logo），用格子近似
+function largestFree(obs, CX, CY) {
+  const GW = 48, GH = Math.max(12, Math.round(48 * CY / CX)), cw = CX / GW, ch = CY / GH, m = CX * 0.012;
+  const occ = Array.from({ length: GH }, () => new Uint8Array(GW));
+  for (const b of obs) {
+    const x0 = Math.max(0, Math.floor((b.x - m) / cw)), x1 = Math.min(GW - 1, Math.ceil((b.x + b.w + m) / cw) - 1);
+    const y0 = Math.max(0, Math.floor((b.y - m) / ch)), y1 = Math.min(GH - 1, Math.ceil((b.y + b.h + m) / ch) - 1);
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) occ[y][x] = 1;
+  }
+  const h = new Array(GW).fill(0);
+  let best = { area: 0, x: 0, y: 0, w: GW, h: GH };
+  for (let y = 0; y < GH; y++) {
+    for (let x = 0; x < GW; x++) h[x] = occ[y][x] ? 0 : h[x] + 1;
+    const st = [];
+    for (let x = 0; x <= GW; x++) {
+      const cur = x < GW ? h[x] : 0;
+      let start = x;
+      while (st.length && st[st.length - 1][1] >= cur) {
+        const [sx, sh] = st.pop(), area = sh * (x - sx);
+        if (area > best.area) best = { area, x: sx, y: y - sh + 1, w: x - sx, h: sh };
+        start = sx;
+      }
+      st.push([start, cur]);
+    }
+  }
+  return { x: best.x * cw, y: best.y * ch, w: best.w * cw, h: best.h * ch };
+}
+
+// PPT 範本：範本原本的投影片都不動，在結尾頁前面加入品項頁
+async function fillPptx() {
+  const JSZip = await loadLib('jszip');
+  const zip = await JSZip.loadAsync(tpl.buf.slice(0));
+  const { pres, presRels, lst, slides } = await slideOrder(zip);
+  const sz = pres.getElementsByTagNameNS(NS.p, 'sldSz')[0];
+  const CX = +sz.getAttribute('cx'), CY = +sz.getAttribute('cy'), AREA = CX * CY;
+  const ct = parseXml(await zip.file('[Content_Types].xml').async('string'));
+  const ctAdd = (tag, attrs) => {
+    if (tag === 'Override' && [...ct.getElementsByTagNameNS(CT_NS, 'Override')].some(o => o.getAttribute('PartName') === attrs.PartName)) return;
+    const e = ct.createElementNS(CT_NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); ct.documentElement.appendChild(e);
+  };
+  const ctHasDefault = ext => [...ct.getElementsByTagNameNS(CT_NS, 'Default')].some(d => d.getAttribute('Extension').toLowerCase() === ext);
+  const ctOf = part => [...ct.getElementsByTagNameNS(CT_NS, 'Override')].find(o => o.getAttribute('PartName') === '/' + part)?.getAttribute('ContentType');
+  // 圖表、SmartArt、內嵌物件、標籤這類不能讓好幾頁共用，每頁各複製一份
+  const SHARED = /\/(slideLayout|slideMaster|image|media|video|audio|hdphoto|hyperlink|slide|notesSlide|theme|font)$/;
+  async function cloneParts(relsDoc, owner, tag) {
+    for (const rel of relsOf(relsDoc)) {
+      if (rel.getAttribute('TargetMode') === 'External' || SHARED.test(rel.getAttribute('Type'))) continue;
+      const src = resolvePath(owner, rel.getAttribute('Target'));
+      if (!zip.file(src)) continue;
+      const dst = src.replace(/(\.[^./]+)$/, `_q${tag}$1`);
+      zip.file(dst, await zip.file(src).async('uint8array'));
+      const type = ctOf(src);
+      if (type) ctAdd('Override', { PartName: '/' + dst, ContentType: type });
+      if (zip.file(relsPath(src))) {
+        const sub = parseXml(await zip.file(relsPath(src)).async('string'));
+        await cloneParts(sub, src, tag);
+        zip.file(relsPath(dst), xmlStr(sub));
+      }
+      rel.setAttribute('Target', rel.getAttribute('Target').replace(/[^/]+$/, dst.split('/').pop()));
+    }
+  }
+  const P14 = 'http://schemas.microsoft.com/office/powerpoint/2010/main';
+  const read = async p => zip.file(p) ? parseXml(await zip.file(p).async('string')) : null;
+  const kids = doc => [...doc.getElementsByTagNameNS(NS.p, 'spTree')[0].children].filter(e => ['sp', 'pic', 'graphicFrame', 'grpSp', 'cxnSp'].includes(e.localName));
+  const hasText = el => aEls(el, 't').some(t => t.textContent.trim());
+  const area = b => b ? b.w * b.h : 0;
+  const R = Math.round;
+
+  // 品項頁的樣式：內頁裡有大張照片的那頁優先，沒有就用第 2 頁
+  const inner = slides.length >= 3 ? slides.slice(1, -1) : slides.slice(slides.length >= 2 ? 1 : 0);
+  let proto = inner[0];
+  for (const s of inner) {
+    const d = await read(s.path);
+    if (d && kids(d).some(e => e.localName === 'pic' && area(xfrmOf(e)) > AREA * 0.15)) { proto = s; break; }
+  }
+  const protoXml = await zip.file(proto.path).async('string');
+  const protoRels = zip.file(relsPath(proto.path)) ? await zip.file(relsPath(proto.path)).async('string') : `<Relationships xmlns="${REL_NS}"/>`;
+  const protoHasPhoto = kids(parseXml(protoXml)).some(e => e.localName === 'pic' && area(xfrmOf(e)) > AREA * 0.15);
+
+  // 版面配置和母片上的固定圖形（Logo、色條）也要避開
+  const fixed = [];
+  const layoutRel = relsOf(parseXml(protoRels)).find(r => r.getAttribute('Type') === REL_T + 'slideLayout');
+  if (layoutRel) {
+    const lp = resolvePath(proto.path, layoutRel.getAttribute('Target')), ld = await read(lp);
+    if (ld) {
+      kids(ld).filter(e => !phType(e)).forEach(e => fixed.push(xfrmOf(e)));
+      const lr = await read(relsPath(lp));
+      const mRel = lr && relsOf(lr).find(r => r.getAttribute('Type') === REL_T + 'slideMaster');
+      const showMaster = ld.documentElement.getAttribute('showMasterSp') !== '0' && parseXml(protoXml).documentElement.getAttribute('showMasterSp') !== '0';
+      const md = showMaster && mRel && await read(resolvePath(lp, mRel.getAttribute('Target')));
+      if (md) kids(md).filter(e => !phType(e)).forEach(e => fixed.push(xfrmOf(e)));
+    }
+  }
+
+  // 複製樣式頁，拿掉上面的文字、照片、圖表，只留背景和裝飾；minimal 時裝飾也拿掉
+  async function baseSlide(tag, minimal) {
+    const doc = parseXml(protoXml), rels = parseXml(protoRels);
+    relsOf(rels).filter(r => r.getAttribute('Type') === REL_T + 'notesSlide').forEach(r => r.remove());
+    // 文字樣式沿用範本標題的字型和顏色
+    const tsp = kids(doc).find(e => ['title', 'ctrTitle'].includes(phType(e)) && hasText(e)) || kids(doc).find(e => e.localName === 'sp' && hasText(e));
+    const rprEl = tsp && aEls(tsp, 'r').map(r => aEls(r, 'rPr')[0]).find(Boolean);
+    const rpr = rprEl ? new XMLSerializer().serializeToString(rprEl) : '';
+    const obstacles = [];
+    for (const e of kids(doc)) {
+      const b = xfrmOf(e), t = phType(e), keepPh = ['sldNum', 'dt', 'ftr'].includes(t);
+      const content = !keepPh && (t || hasText(e) || e.localName === 'graphicFrame' || (e.localName === 'pic' && area(b) > AREA * 0.04));
+      if (content || (minimal && !keepPh && area(b) < AREA * 0.5 && !(e.localName === 'pic' && area(b) < AREA * 0.04))) { e.remove(); continue; }
+      if (b && area(b) < AREA * 0.5) obstacles.push(b);
+    }
+    doc.getElementsByTagNameNS(NS.p, 'timing')[0]?.remove(); // 範本的動畫指著拿掉的東西
+    [...doc.getElementsByTagNameNS(P14, 'creationId')].forEach(e => e.setAttribute('val', String(Math.floor(Math.random() * 4294967295))));
+    await cloneParts(rels, proto.path, tag);
+    return { doc, rels, rpr, obstacles: [...obstacles, ...fixed.filter(b => b && area(b) < AREA * 0.5)] };
+  }
+
+  function textBox(doc, id, b, text, rpr, sz, bold, algn) {
+    const node = doc.importNode(parseXml(`<p:sp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvSpPr><p:cNvPr id="${id}" name="文字 ${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${R(b.x)}" y="${R(b.y)}"/><a:ext cx="${R(b.w)}" cy="${R(b.h)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="${bold ? 'ctr' : 't'}"><a:normAutofit/></a:bodyPr><a:lstStyle/><a:p><a:pPr algn="${algn}"/><a:r><a:rPr lang="zh-TW"/><a:t></a:t></a:r></a:p></p:txBody></p:sp>`).documentElement, true);
+    aEls(node, 't')[0].textContent = text;
+    if (rpr) aEls(node, 'rPr')[0].replaceWith(doc.importNode(parseXml(rpr).documentElement, true));
+    const r = aEls(node, 'rPr')[0];
+    r.setAttribute('lang', 'zh-TW'); r.setAttribute('sz', String(sz)); r.setAttribute('b', bold ? '1' : '0'); r.removeAttribute('dirty');
+    [...r.children].filter(c => /^hlink/.test(c.localName)).forEach(c => c.remove());
+    // 範本標題是壓在照片上的白字，放到空白處會看不到，改用預設文字顏色
+    const fill = [...r.children].find(c => c.localName === 'solidFill');
+    const clr = fill?.firstElementChild, white = clr && ((clr.localName === 'srgbClr' && /^F{6}$/i.test(clr.getAttribute('val'))) || (clr.localName === 'schemeClr' && /^(bg1|lt1)$/.test(clr.getAttribute('val'))));
+    if (white && protoHasPhoto) fill.remove();
+    return node;
+  }
+  function picNode(doc, id, rid, b) {
+    return doc.importNode(parseXml(`<p:pic xmlns:p="${NS.p}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><p:nvPicPr><p:cNvPr id="${id}" name="Picture ${id}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="${R(b.x)}" y="${R(b.y)}"/><a:ext cx="${R(b.w)}" cy="${R(b.h)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`).documentElement, true);
+  }
+
+  let slideNum = Math.max(0, ...Object.keys(zip.files).map(f => +((f.match(/^ppt\/slides\/slide(\d+)\.xml$/) || [])[1] || 0)));
+  let sldId = Math.max(255, ...slides.map(s => +s.el.getAttribute('id')));
+  const items = quoteItems(), pages = roomPages(items), newEls = [];
+  let done = 0;
+
+  for (let pi = 0; pi < pages.length; pi++) {
+    const pg = pages[pi];
+    let base = await baseSlide(pi + 1, false), free = largestFree(base.obstacles, CX, CY);
+    if (area(free) < AREA * 0.3) { base = await baseSlide(pi + 1, true); free = largestFree(base.obstacles, CX, CY); }
+    const { doc, rels, rpr } = base;
+    const tree = doc.getElementsByTagNameNS(NS.p, 'spTree')[0];
+    let nextId = Math.max(1, ...[...doc.getElementsByTagNameNS(NS.p, 'cNvPr')].map(e => +e.getAttribute('id') || 0)) + 1;
+
+    // 空白區留邊：上方放空間名稱，下面排圖片和品名
+    const pad = Math.min(free.w, free.h) * 0.05;
+    const box = { x: free.x + pad, y: free.y + pad, w: free.w - pad * 2, h: free.h - pad * 2 };
+    const titleH = Math.min(CY * 0.1, box.h * 0.16), gap = Math.min(CX, CY) * 0.03;
+    const body = { x: box.x, y: box.y + titleH + gap * 0.6, w: box.w, h: box.h - titleH - gap * 0.6 };
+    const capH = Math.min(CY * 0.065, body.h * 0.16);
+    const cells = gridCells(body, pg.items.length, capH, gap);
+    const pt = emu => Math.round(emu / 12700);
+    tree.appendChild(textBox(doc, nextId++, { x: box.x, y: box.y, w: box.w, h: titleH }, pg.title, rpr, Math.min(3200, Math.max(1600, pt(titleH) * 60)), true, 'l'));
+    for (let j = 0; j < pg.items.length; j++) {
+      const img = pg.items[j];
+      showMsg(`處理圖片 ${++done} / ${items.length}…`);
+      try {
+        const p = await prepImage(img.file, 720);
+        const ext = p.extension === 'png' ? 'png' : 'jpeg', media = `qimg${pi + 1}_${j + 1}.${ext}`, rid = 'rIdQ' + (j + 1);
+        zip.file('ppt/media/' + media, p.buffer);
+        if (!ctHasDefault(ext)) ctAdd('Default', { Extension: ext, ContentType: 'image/' + ext });
+        const rel = rels.createElementNS(REL_NS, 'Relationship');
+        rel.setAttribute('Id', rid); rel.setAttribute('Type', REL_T + 'image'); rel.setAttribute('Target', '../media/' + media);
+        rels.documentElement.appendChild(rel);
+        tree.appendChild(picNode(doc, nextId++, rid, fitBottom(cells[j], p.w, p.h)));
+      } catch {}
+      tree.appendChild(textBox(doc, nextId++, cells[j].cap, labelOf(img), rpr, Math.min(1800, Math.max(1000, pt(capH) * 55)), false, 'ctr'));
+    }
+
+    const path = `ppt/slides/slide${++slideNum}.xml`;
+    zip.file(path, xmlStr(doc));
+    zip.file(relsPath(path), xmlStr(rels));
+    ctAdd('Override', { PartName: '/' + path, ContentType: 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml' });
+    const prid = 'rIdQS' + (pi + 1);
+    const pr = presRels.createElementNS(REL_NS, 'Relationship');
+    pr.setAttribute('Id', prid); pr.setAttribute('Type', REL_T + 'slide'); pr.setAttribute('Target', `slides/slide${slideNum}.xml`);
+    presRels.documentElement.appendChild(pr);
+    const el = pres.createElementNS(NS.p, 'p:sldId');
+    el.setAttribute('id', ++sldId); el.setAttributeNS(NS.r, 'r:id', prid);
+    newEls.push(el);
+  }
+
+  // 插在結尾頁前面（範本只有 1、2 頁就放最後）；章節也跟著加進去
+  const before = slides.length >= 3 ? slides[slides.length - 1] : null;
+  newEls.forEach(e => lst.insertBefore(e, before ? before.el : null));
+  const prevId = (before ? slides[slides.length - 2] : slides[slides.length - 1]).el.getAttribute('id');
+  for (const hit of pres.getElementsByTagNameNS('*', 'sldId')) {
+    if (hit.namespaceURI === NS.p || hit.getAttribute('id') !== prevId) continue;
+    let after = hit;
+    for (const e of newEls) {
+      const n = pres.createElementNS(hit.namespaceURI, hit.prefix ? hit.prefix + ':sldId' : 'sldId');
+      n.setAttribute('id', e.getAttribute('id'));
+      after.after(n); after = n;
+    }
+    break;
+  }
+
+  zip.file('ppt/presentation.xml', xmlStr(pres));
+  zip.file('ppt/_rels/presentation.xml.rels', xmlStr(presRels));
+  zip.file('[Content_Types].xml', xmlStr(ct));
+  return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+}
+
+// ---------- 產生 Word ----------
+async function buildDocx() {
+  const D = await loadLib('docx');
+  const spec = currentSpec(), tax = $('qTax').value === '1';
+  const H = Math.min(+$('size').value, 120);
+  const cols = tpl ? spec.cols : spec.cols.filter(c => ['index', 'image', 'name', 'qty', 'price', 'amount'].includes(c.role));
+  const N = cols.length, items = quoteItems();
+  const FONT = 'Microsoft JhengHei';
+  const TW = { index: 700, image: 2400, name: 2600, qty: 800, unit: 700, price: 1200, amount: 1300, other: 1300 }; // 單位 twip
+  let widths = cols.map(c => TW[c.role]);
+  const sum = widths.reduce((a, b) => a + b, 0), AVAIL = 10100;
+  if (sum > AVAIL) widths = widths.map(w => Math.floor(w * AVAIL / sum));
+  const iImg = cols.findIndex(c => c.role === 'image'), iAmt = cols.findIndex(c => c.role === 'amount');
+  const MAXW = Math.floor(widths[iImg] / 15) - 12;
+  const C = D.AlignmentType.CENTER, R = D.AlignmentType.RIGHT;
+  const txt = (text, o = {}) => new D.Paragraph({ alignment: o.align || D.AlignmentType.LEFT, children: [new D.TextRun({ text: String(text), bold: o.bold, size: o.size, font: FONT })] });
+  const cell = (children, i, o = {}) => new D.TableCell({
+    children: Array.isArray(children) ? children : [children], verticalAlign: D.VerticalAlign.CENTER,
+    width: { size: widths.slice(i, i + (o.span || 1)).reduce((a, b) => a + b, 0), type: D.WidthType.DXA },
+    columnSpan: o.span, shading: o.fill ? { fill: o.fill, type: D.ShadingType.CLEAR, color: 'auto' } : undefined,
+    margins: { top: 60, bottom: 60, left: 80, right: 80 },
+  });
+
+  const rows = [new D.TableRow({ tableHeader: true, children: cols.map((c, i) => cell(txt(c.name, { bold: true, align: C }), i, { fill: 'E3F1E8' })) })];
+  for (let i = 0; i < items.length; i++) {
+    showMsg(`處理圖片 ${i + 1} / ${items.length}…`);
+    let pic = txt('');
+    try {
+      const p = await prepImage(items[i].file, H);
+      const k = Math.min(1, MAXW / p.w);
+      pic = new D.Paragraph({ alignment: C, children: [new D.ImageRun({ data: p.buffer, transformation: { width: Math.round(p.w * k), height: Math.round(p.h * k) } })] });
+    } catch {}
+    rows.push(new D.TableRow({ cantSplit: true, children: cols.map((c, j) => {
+      if (c.role === 'image') return cell(pic, j);
+      const v = c.role === 'index' ? i + 1 : c.role === 'name' ? labelOf(items[i]) : c.role === 'qty' ? 1 : c.role === 'unit' && !tpl ? '件' : '';
+      return cell(txt(v, { align: ['index', 'qty', 'unit'].includes(c.role) ? C : undefined }), j);
+    }) }));
+  }
+  if (iAmt > 0) {
+    const total = label => new D.TableRow({ children: [
+      cell(txt(label, { bold: label === '總計', align: R }), 0, { span: iAmt }), cell(txt(''), iAmt),
+      ...(iAmt < N - 1 ? [cell(txt(''), iAmt + 1, { span: N - 1 - iAmt })] : []),
+    ] });
+    rows.push(total('小計'));
+    if (tax) rows.push(total('營業稅 5%'));
+    rows.push(total('總計'));
+  }
+
+  const head = spec.head.map((line, i) => {
+    const big = i === 0 && !isTitleLine(line), title = isTitleLine(line);
+    return txt(line, { bold: big || title, size: big ? 36 : title ? 30 : undefined, align: big || title ? C : undefined });
+  });
+  const info = infoParts(spec);
+  const infoPara = info.client && info.date
+    ? [new D.Paragraph({ tabStops: [{ type: D.TabStopType.RIGHT, position: 10000 }], children: [new D.TextRun({ text: info.client, font: FONT }), new D.TextRun({ text: '\t' + info.date, font: FONT })] })]
+    : [info.client, info.date].filter(Boolean).map(t => txt(t));
+  const doc = new D.Document({
+    styles: { default: { document: { run: { font: FONT, size: 22 } } } },
+    sections: [{
+      properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 1000, bottom: 1000, left: 900, right: 900 } } },
+      children: [
+        ...head, txt(''), ...infoPara, ...(infoPara.length ? [txt('')] : []),
+        new D.Table({ rows, width: { size: widths.reduce((a, b) => a + b, 0), type: D.WidthType.DXA }, columnWidths: widths }),
+        txt(''),
+        ...spec.notes.map(l => txt(l)),
+        ...(spec.sign ? [txt(''), new D.Paragraph({ tabStops: [{ type: D.TabStopType.LEFT, position: 5500 }], children: [new D.TextRun({ text: '報價人：', font: FONT }), new D.TextRun({ text: '\t客戶簽名：', font: FONT })] })] : []),
+      ],
+    }],
+  });
+  return D.Packer.toBlob(doc);
+}
+
+// ---------- 下載 ----------
+let downloads; // 在 Claude 裡開啟時用平台的下載功能
+if (window.claude?.use) window.claude.use('downloads').then(d => downloads = d).catch(() => {});
+
+async function save(blob, filename) {
+  if (downloads) {
+    try { await downloads.save({ filename, data: blob }); return '已下載：' + filename; }
+    catch (e) { if (e?.code === 'declined') return '已取消下載。'; if (e?.code === 'rate_limited') return '下載視窗還開著，請先處理它。'; }
+  }
+  if (window.claude?.use && !downloads) throw new Error('nodl');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  return '已下載：' + filename;
+}
+
+$('go').addEventListener('click', async () => {
+  $('go').disabled = true;
+  try {
+    const fmt = $('qFmt').value;
+    fillNote = '';
+    const blob = await (fmt === 'pptx' ? buildPptx() : fmt === 'docx' ? buildDocx() : buildXlsx());
+    const client = $('qClient').value.trim().replace(/[\\/:*?"<>|]/g, '');
+    const done = await save(blob, `${fmt === 'pptx' ? '簡報' : '估價單'}${client ? '_' + client : ''}_${todayStr('')}.${fmt}`);
+    showMsg(fillNote ? done + '　' + fillNote : done, /沒有放進去/.test(fillNote));
+  } catch (e) {
+    showMsg(e.message === 'nodl' ? '這個畫面不能下載檔案，請在 claude.ai 開啟這個頁面。' : '產生失敗：' + (e.message || e), true);
+  } finally { $('go').disabled = !images.length; }
+});
+
+// 選完清掉選取，下次選同一個檔案或資料夾也會觸發
+$('folder').addEventListener('change', e => { addImages([...e.target.files]); e.target.value = ''; });
+$('files').addEventListener('change', e => { addImages([...e.target.files]); e.target.value = ''; });
+$('tplFile').addEventListener('change', e => e.target.files[0] && loadTemplate(e.target.files[0]));
+$('qFmt').addEventListener('change', () => { try { localStorage.setItem('xlsimg-fmt', $('qFmt').value); } catch {} renderOptions(); });
+$('aiOn').addEventListener('change', () => {
+  try { localStorage.setItem('xlsimg-ai', $('aiOn').checked ? '1' : '0'); } catch {}
+  if ($('aiOn').checked) runAI(); else { aiRun++; images.forEach(i => i.ai = false); updateNames(); setAiMsg(''); }
+});
+try { if (localStorage.getItem('xlsimg-ai') === '0') $('aiOn').checked = false; } catch {}
+try { if (localStorage.getItem('xlsimg-tax') === '1') $('qTax').value = '1'; } catch {}
+$('qTax').addEventListener('change', () => { try { localStorage.setItem('xlsimg-tax', $('qTax').value); } catch {} });
+
+// ---------- 拖放（可拖整個資料夾） ----------
+function readEntry(entry) {
+  return new Promise(ok => {
+    if (entry.isFile) return entry.file(f => ok([f]), () => ok([]));
+    const rd = entry.createReader(), out = [];
+    const more = () => rd.readEntries(async ents => {
+      if (!ents.length) return ok((await Promise.all(out.map(readEntry))).flat());
+      out.push(...ents); more();
+    }, () => ok([]));
+    more();
+  });
+}
+addEventListener('dragover', e => { e.preventDefault(); $('app').classList.add('drop-on'); });
+addEventListener('dragleave', e => { if (!e.relatedTarget) $('app').classList.remove('drop-on'); });
+addEventListener('drop', async e => {
+  e.preventDefault(); $('app').classList.remove('drop-on');
+  const entries = [...e.dataTransfer.items].map(i => i.webkitGetAsEntry?.()).filter(Boolean);
+  const files = entries.length ? (await Promise.all(entries.map(readEntry))).flat() : [...e.dataTransfer.files];
+  const t = files.find(f => TPL_EXT.test(f.name));
+  if (t) await loadTemplate(t);
+  const imgs = files.filter(f => IMG_EXT.test(f.name));
+  if (imgs.length) addImages(imgs);
+});
+
+// 公司名稱記在這台電腦，下次不用重打
+try { $('qCompany').value = localStorage.getItem('xlsimg-company') || ''; } catch {}
+$('qCompany').addEventListener('input', () => { try { localStorage.setItem('xlsimg-company', $('qCompany').value); } catch {} });
+
+// 記住上次的檔案類型和範本，下次打開直接選圖片就能下載
+try { const f = localStorage.getItem('xlsimg-fmt'); if (f && $('qFmt').querySelector(`option[value="${f}"]`)) $('qFmt').value = f; } catch {}
+renderOptions();
+refresh();
+Store.get('tpl').then(saved => {
+  if (!saved || tpl || !saved.buf) return;
+  tpl = { ...saved, restored: true };
+  if (tpl.kind === 'xlsx' || tpl.kind === 'pptx') $('qFmt').value = tpl.kind;
+  renderOptions();
+  if (tpl.kind === 'xlsx' && !tpl.spec.map) aiMapColumns();
+});
+</script>
+</body>
+</html>
