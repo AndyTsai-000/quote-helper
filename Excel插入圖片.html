@@ -44,6 +44,10 @@ input[type=text]{width:60%}
 .tplinfo{margin-top:10px;padding:10px 12px;border-radius:8px;background:var(--accent-soft);font-size:13px;display:flex;flex-direction:column;gap:2px}
 .tpl-name{font-weight:700;color:var(--accent);word-break:break-all}
 .tpl-meta{color:var(--muted);overflow-wrap:anywhere}
+.ask{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:6px 0;padding:8px 10px;border-radius:6px;background:var(--panel);font-weight:500;color:var(--fg)}
+.ask .mini2{padding:3px 14px}
+.ask .mini2.yes{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.tpl-acts{display:flex;gap:14px}
 button.link{align-self:flex-start;background:none;border:0;padding:0;margin-top:4px;color:var(--warn);font:inherit;font-size:13px;text-decoration:underline;cursor:pointer}
 button.go{width:100%;font:inherit;font-weight:700;font-size:16px;padding:12px;border:0;border-radius:8px;background:var(--accent);color:var(--accent-fg);cursor:pointer;margin-top:14px}
 button.go:disabled{opacity:.45;cursor:not-allowed}
@@ -590,7 +594,7 @@ const nameKey = name => flat(name).toLowerCase();
 async function memLoad() {
   const list = (await Store.all('memory')) || [];
   memCache = new Map(list.map(r => [r.hash, r]));
-  memByName = new Map(list.filter(r => r.price != null).sort((a, b) => a.updated - b.updated).map(r => [nameKey(r.name), r]));
+  memByName = new Map(list.filter(r => r.name && r.price != null).sort((a, b) => a.updated - b.updated).map(r => [nameKey(r.name), r]));
 }
 async function hashOf(img) {
   if (img.hash) return img.hash;
@@ -606,7 +610,9 @@ function applyMem() {
     const r = img.hash && memCache.get(img.hash);
     if (r && !img.memApplied) {
       img.memApplied = true;
-      if (!img.edited) { img.label = r.name; img.aiDone = true; img.fromMem = true; }
+      // 只有記過真正品名的照片才跳過 AI；上次只是用檔名代替的，這次照樣交給 AI 取名
+      // v2 之前的紀錄可能把檔名當品名記下來，那種品名不採用
+      if (r.name && r.v >= 2 && !img.edited) { img.label = r.name; img.aiDone = true; img.fromMem = true; }
       if (!img.priceEdited && r.price != null) { img.price = r.price; img.priceFromLib = true; }
       if (!img.specEdited && r.spec) img.spec = r.spec;
       if (!img.roomEdited && r.room) img.room = r.room;
@@ -617,9 +623,13 @@ function applyMem() {
 }
 async function memSave(items) {
   for (const img of items) {
-    const name = labelOf(img).trim();
-    if (!name) continue;
-    await Store.put('memory', { hash: await hashOf(img), name, price: priceOf(img), room: img.room || '', spec: (img.spec || '').trim(), updated: Date.now() });
+    // 品名是 AI 取的、自己改的或之前記住的才記；只是檔名代替的不記，免得下次擋掉 AI 取名
+    const real = img.edited || img.aiDone || img.fromMem;
+    const name = real ? labelOf(img).trim() : '';
+    const price = priceOf(img), spec = (img.spec || '').trim();
+    if (!name && price == null && !spec) continue;
+    const old = memCache.get(await hashOf(img));
+    await Store.put('memory', { v: 2, hash: img.hash, name: name || (old?.v >= 2 ? old.name : '') || '', price, room: img.room || '', spec, updated: Date.now() });
   }
   await memLoad();
 }
@@ -631,7 +641,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27';
+const APP_VERSION = '2026-10-27.2';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -822,13 +832,20 @@ function renderOptions() {
       : n === 2 ? '沿用這份簡報的設計：第 1 頁當封面，第 2 頁當每個品項的樣式'
       : '沿用這份簡報的設計，每個品項一頁')
     : fmt === 'pptx' ? '封面標題用範本的抬頭' : '照範本的抬頭、欄位和備註產生';
-  box.innerHTML = `<div class="tpl-name">✓ 範本：${esc(tpl.name)}${tpl.restored ? '<span class="muted">（上次用的，已自動載入）</span>' : ''}</div><div>${how}</div>`
+  box.innerHTML = `<div class="tpl-name">✓ 範本：${esc(tpl.name)}${tpl.fixed ? '<span class="muted">（固定範本，打開網頁會自動載入）</span>' : ''}</div>`
+    + (tpl.ask ? '<div class="ask">是否將此檔案成為固定範本檔？<button type="button" class="mini2 yes" id="fixYes">是</button><button type="button" class="mini2" id="fixNo">否</button></div>' : '')
+    + `<div>${how}</div>`
     + (s.head[0] ? `<div class="tpl-meta">抬頭：${esc(s.head[0])}</div>` : '')
     + (tpl.kind === 'xlsx'
       ? `<div class="tpl-meta">${tpl.aiBusy ? 'AI 判斷欄位中…' : (s.map ? 'AI 判斷的' : '') + '欄位用途：' + esc(s.cols.filter(c => ROLE_LABEL[c.role]).map(c => `${c.letter} ${c.name}→${roleLabel(c)}`).join('、'))}</div>`
       : s.cols.length ? `<div class="tpl-meta">欄位：${esc(s.cols.map(c => c.name).join('、'))}</div>` : '')
-    + '<button type="button" class="link" id="tplDrop">不用範本</button>';
-  $('tplDrop').onclick = () => { tpl = null; $('tplFile').value = ''; Store.del('tpl'); renderOptions(); };
+    + '<div class="tpl-acts"><button type="button" class="link" id="tplDrop">不用範本</button>'
+    + (tpl.fixed ? '<button type="button" class="link" id="fixOff">取消固定</button>' : '') + '</div>';
+  // 「不用範本」只是這次不用；固定範本要按「取消固定」才不會再自動載入
+  $('tplDrop').onclick = () => { tpl = null; $('tplFile').value = ''; renderOptions(); };
+  if ($('fixYes')) $('fixYes').onclick = () => { tpl.ask = false; tpl.fixed = true; saveTpl(); renderOptions(); };
+  if ($('fixNo')) $('fixNo').onclick = () => { tpl.ask = false; renderOptions(); };
+  if ($('fixOff')) $('fixOff').onclick = () => { tpl.fixed = false; Store.del('tpl'); renderOptions(); };
 }
 
 // ---------- 記住範本（存在這台電腦的瀏覽器裡） ----------
@@ -862,7 +879,8 @@ const Store = {
   all(store) { return this.run('readonly', s => s.getAll(), store); },
   put(store, v) { return this.run('readwrite', s => s.put(v), store); },
 };
-function saveTpl() { if (tpl) Store.set('tpl', { kind: tpl.kind, name: tpl.name, buf: tpl.buf, spec: tpl.spec }); }
+// 只有按「是」設成固定範本的才存，下次打開自動載入
+function saveTpl() { if (tpl?.fixed) Store.set('tpl', { kind: tpl.kind, name: tpl.name, buf: tpl.buf, spec: tpl.spec }); }
 
 // ---------- 讀範本 ----------
 async function loadTemplate(file) {
@@ -875,8 +893,7 @@ async function loadTemplate(file) {
     else if (ext === 'pdf') { kind = 'pdf'; spec = await specFromPdf(buf); }
     else if (ext === 'pptx') { kind = 'pptx'; spec = await specFromPptx(buf); }
     else throw new Error('範本只能用 Excel（.xlsx）、PDF 或 PPT（.pptx）。舊的 .xls、.ppt 請先另存新檔。');
-    tpl = { kind, name: file.name, buf, spec };
-    saveTpl();
+    tpl = { kind, name: file.name, buf, spec, ask: true }; // 問要不要設成固定範本
     if (kind === 'xlsx' || kind === 'pptx') $('qFmt').value = kind;
     else if ($('qFmt').value === 'pptx') $('qFmt').value = 'xlsx';
     showMsg('');
@@ -1917,7 +1934,7 @@ renderOptions();
 refresh();
 Store.get('tpl').then(saved => {
   if (!saved || tpl || !saved.buf) return;
-  tpl = { ...saved, restored: true };
+  tpl = { ...saved, fixed: true };
   if (tpl.kind === 'xlsx' || tpl.kind === 'pptx') $('qFmt').value = tpl.kind;
   renderOptions();
   if (tpl.kind === 'xlsx' && !tpl.spec.map) aiMapColumns();
