@@ -371,7 +371,7 @@ async function addImages(list) {
   if (list.length > pics.length) notes.push(`略過 ${list.length - pics.length} 個非圖片檔`);
   if (pics.length > fresh.length) notes.push(`${pics.length - fresh.length} 張已經加過`);
   showImgCount(fresh.length, notes);
-  aiRun++; setAiMsg('');
+  aiRun++; if (sampler) setAiMsg('');
   refresh();
   processThumbs();
   // 先比對照片記憶（用過的照片直接帶入上次的品名），剩下的才交給 AI 取名
@@ -387,7 +387,7 @@ function makeItem(f, extra = {}) {
 function clearImages() {
   images.forEach(i => URL.revokeObjectURL(i.url));
   images = [];
-  aiRun++; setAiMsg('');
+  aiRun++; if (sampler) setAiMsg('');
   showImgCount(0, []);
   refresh();
 }
@@ -404,15 +404,26 @@ function showImgCount(added, notes) {
 // ---------- AI 看圖取品名 ----------
 let sampler = null, aiMax = 1, aiRun = 0;
 function setAiMsg(t, err) { $('aiMsg').textContent = t; $('aiMsg').classList.toggle('err', !!err); }
+// AI 不能用時把原因寫在圖片區和「回報問題」裡，方便查
+let aiReason = window.claude?.use ? '還在連線' : '公開網址沒有 AI 自動取名';
+function aiNote(reason) {
+  aiReason = reason;
+  if (!sampler) setAiMsg(`AI 自動取名不能用：${reason}。品名先用檔名，可以直接修改。`);
+}
+if (!window.claude?.use) setTimeout(() => aiNote('公開網址沒有 AI，要 AI 自動取名請用 Claude 版'), 0);
+else setTimeout(() => { if (!sampler && aiReason === '還在連線') aiNote('連不到 Claude（等了 15 秒）'); }, 15000);
 if (window.claude?.use) window.claude.use('sample').then(async s => {
-  const lim = s && await s.limits().catch(() => null);
-  if (!lim?.images) return;
+  if (!s) return aiNote('這個畫面沒有開放 AI（可能沒登入 Claude，或是用分享連結開的）');
+  let lim = null, limErr = '';
+  try { lim = await s.limits(); } catch (e) { limErr = e?.code || e?.message || String(e); }
+  if (!lim?.images) return aiNote(limErr ? `讀不到 AI 設定（${limErr}）` : '這個畫面不能傳圖片給 AI');
+  aiReason = '可以用';
   sampler = s; aiMax = Math.max(1, Math.min(lim.images.maxCount || 1, 8));
   $('aiField').hidden = false;
   $('subName').textContent = 'AI 會看圖片取好品名';
   if (tpl?.kind === 'xlsx' && !tpl.spec.map) aiMapColumns();
   if (images.length && $('aiOn').checked) runAI();
-}).catch(() => {});
+}).catch(e => aiNote(`連線失敗（${e?.code || e?.message || e}）`));
 
 // 縮成 1024 像素的 JPEG 再送，比較快
 async function aiBlob(file) {
@@ -465,7 +476,11 @@ async function runAI() {
       if (run !== aiRun) return;
       list.forEach(i => i.ai = false);
       updateNames();
-      if (AI_STOP.includes(e?.code)) { sampler = null; $('aiField').hidden = true; setAiMsg(''); }
+      aiReason = `上次 AI 取名失敗（${e?.code || ''} ${e?.message || ''}）`.trim();
+      if (AI_STOP.includes(e?.code)) {
+        sampler = null; $('aiField').hidden = true;
+        aiNote(e.code === 'not_granted' ? '沒有允許這個頁面使用 Claude（重新整理後按「允許」）' : `AI 不能用（${e.code}）`);
+      }
       else setAiMsg(AI_ERR[e?.code] || 'AI 取名沒有完成，品名先用檔名，可以直接修改。', true);
       return;
     }
@@ -648,7 +663,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27.2';
+const APP_VERSION = '2026-10-27.3';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -668,7 +683,8 @@ function reportText() {
     lines.push(`  品項位置：${s.slots}　圖片放在：${s.imgAt.trim()}`);
     if (s.sheets) lines.push(`  工作表：${s.sheets.map(x => `${x.name}（${x.cap} 項）`).join('、')}`);
   }
-  lines.push(`圖片處理：${$('imgProc').selectedOptions[0].text}　AI 取名：${sampler ? ($('aiOn').checked ? '開' : '關') : '不能用'}`);
+  lines.push(`圖片處理：${$('imgProc').selectedOptions[0].text}　AI 取名：${sampler ? ($('aiOn').checked ? '開' : '關') : '不能用'}（${aiReason}）`);
+  lines.push(`AI 訊息：${$('aiMsg').textContent || '（沒有）'}`);
   lines.push(`品項（${items.length}）：`);
   items.forEach((img, n) => lines.push(`  ${n + 1}. ${img.name} → ${labelOf(img)}｜數量 ${qtyOf(img)}｜單價 ${priceOf(img) ?? '未填'}${(img.spec || '').trim() ? '｜規格 ' + img.spec.trim() : ''}${img.room ? '｜' + img.room : ''}${img.fromMem ? '｜照片記憶' : ''}`));
   lines.push(`最後的訊息：${$('msg').textContent || '（沒有）'}`);
