@@ -308,11 +308,35 @@ const CLIENT_ONLY = /^(客戶名稱|客戶姓名|客戶|顧客|業主|貴賓|買
 // 「客戶：王先生」或「客戶名稱　王先生」都認得
 const STOP = '(?:(?!日期|報價|估價|電話|地址|統一編號|統編|聯絡|傳真|手機|簽|蓋|確認)[^\\s:：])*';
 const CLIENT_RE = new RegExp(`(客戶名稱|客戶姓名|客戶|顧客|業主|貴賓|買受人|訂購人)(\\s*[:：]\\s*|\\s+)${STOP}`, 'g');
-const DATE_RE = /(報價日期|估價日期|日期)(\s*[:：]\s*|\s+)[\d０-９\/\-.年月日]*/g;
+// ---------- 日期：照範本原本的寫法填今天 ----------
+// 「115年  月  日」「111年00月00日」→ 115年10月27日；「2024/12/31」→ 2026/10/27；「115/1/1」→ 115/10/27
+const DATE_WORD = /(報價日期|估價日期|訂購日期|日期)/;
+function todayIn(s) {
+  const d = new Date(), Y = d.getFullYear(), M = d.getMonth() + 1, D = d.getDate();
+  const two = (n, like) => like && like.length === 2 ? String(n).padStart(2, '0') : String(n);
+  const ymd = /(\d{2,4})?(\s*)年\s*(\d{1,2}|_+)?\s*月\s*(\d{1,2}|_+)?\s*日/;
+  if (ymd.test(s)) return s.replace(ymd, (m, y, sp, mo, da) => `${y && y.length === 4 ? Y : Y - 1911}年${two(M, mo)}月${two(D, da)}日`);
+  const num = /(\d{2,4})([\/\-.])(\d{1,2})\2(\d{1,2})/;
+  if (num.test(s)) return s.replace(num, (m, y, sep, mo, da) => `${y.length === 4 ? Y : Y - 1911}${sep}${two(M, mo)}${sep}${two(D, da)}`);
+  return null;
+}
+// 一段文字裡的日期：「日期：」後面那段照格式換成今天；後面空白就填 西元/月/日；「中華民國　年　月　日」也會填
+function fillDateText(t) {
+  const s = String(t), m = s.match(DATE_WORD);
+  if (m) {
+    const head = s.slice(0, m.index + m[0].length), tail = s.slice(m.index + m[0].length);
+    const neu = todayIn(tail);
+    if (neu != null) return head + neu;
+    if (/^\s*[:：]\s*$/.test(tail)) return head + tail.replace(/\s*$/, '') + todayStr('/');
+    return s;
+  }
+  if (/中華民國/.test(s)) return todayIn(s) ?? s;
+  return s;
+}
 // 把範本上的「客戶：」「日期：」換成這次的
 function fillInfo(t) {
   const c = $('qClient').value.trim();
-  return String(t).replace(CLIENT_RE, (m, a, b) => a + b + c).replace(DATE_RE, (m, a, b) => a + b + todayStr('/'));
+  return fillDateText(String(t).replace(CLIENT_RE, (m, a, b) => a + b + c));
 }
 
 const DEFAULT_COLS = ['項次', '圖片', '品名', '規格', '數量', '單位', '單價', '金額', '備註'];
@@ -663,7 +687,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27.3';
+const APP_VERSION = '2026-10-27.4';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -1503,11 +1527,21 @@ async function fillBlocks(wb, ws, t, rows, items, used, doneBefore) {
   const client = $('qClient').value.trim();
   const infoRows = [...range(1, t.h - 1), ...(t.totEnd ? range(t.totEnd + 1, ws.rowCount) : [])];
   for (const r of infoRows) for (const { col, cell, text } of masterCells(ws, r)) {
+    if (isFormula(cell)) continue;
     const f = flat(text).replace(/[:：]$/, '');
     const kind = CLIENT_ONLY.test(f) ? 'client' : DATE_ONLY.test(f) ? 'date' : null;
-    if (!kind || (kind === 'client' && !client)) continue;
+    if (!kind) {
+      // 同一格裡就有日期：「日期：115年  月  日」「中華民國　年　月　日」照原本的寫法填今天
+      if (DATE_WORD.test(text) || /中華民國.*年.*月.*日/.test(text)) { const neu = fillDateText(text); if (neu !== text) cell.value = neu; }
+      continue;
+    }
+    if (kind === 'client' && !client) continue;
     const next = ws.getCell(r, col + mergeSpan(ws, cell)).master;
-    if (isBlank(next)) next.value = kind === 'client' ? client : todayStr('/');
+    if (kind === 'client') { if (isBlank(next)) next.value = client; continue; }
+    // 「日期」旁邊那格：空白填今天；是日期值就換今天（格式不動）；是文字就照它的寫法換
+    if (isBlank(next)) next.value = todayStr('/');
+    else if (next.value instanceof Date) { const d = new Date(); next.value = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); }
+    else if (!isFormula(next)) { const neu = todayIn(cellText(next)); if (neu != null) next.value = neu; }
   }
 }
 
