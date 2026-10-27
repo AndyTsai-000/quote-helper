@@ -74,6 +74,10 @@ td.r{font-family:var(--mono);color:var(--muted);font-variant-numeric:tabular-num
 .thumbs img,.ph{height:56px;width:auto;max-width:90px;border-radius:4px;border:1px solid var(--line);display:block;object-fit:contain;background:var(--bg)}
 .ph{width:72px}
 .thumbs figcaption{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.thumbs{position:relative}
+button.del{position:absolute;top:-6px;right:-6px;z-index:1;width:22px;height:22px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:12px;line-height:1;cursor:pointer;display:grid;place-items:center;padding:0}
+button.del:hover,button.del:focus-visible{color:#fff;background:var(--warn);border-color:var(--warn)}
+.undo{margin-top:4px;color:var(--muted);display:flex;gap:8px;align-items:center}
 .drop-on .card{border-color:var(--accent)}
 .muted{color:var(--muted)}
 [hidden]{display:none!important}
@@ -415,14 +419,34 @@ function clearImages() {
   showImgCount(0, []);
   refresh();
 }
-function showImgCount(added, notes) {
+function showImgCount(added, notes, undo) {
   const n = images.length;
-  $('imgName').innerHTML = n
+  $('imgName').innerHTML = (n
     ? `✓ 共 ${n} 張圖片` + (added && added < n ? `（這次加入 ${added} 張）` : '') + (notes.length ? `<span class="muted">　${notes.join('，')}</span>` : '')
       + ` <button type="button" class="link" id="imgClear">清除全部圖片</button>`
-    : (notes.length ? '沒有加入新的圖片：' + notes.join('，') : '');
+    : (notes.length ? '沒有加入新的圖片：' + notes.join('，') : ''))
+    + (undo ? `<div class="undo">已刪除「${esc(labelOf(undo.it))}」<button type="button" class="link" id="imgUndo">復原</button></div>` : '');
   if (n) $('imgClear').onclick = clearImages;
+  if (undo) $('imgUndo').onclick = undoDelete;
   $('s2').classList.toggle('done', n > 0);
+}
+// 刪除一張（清單上的 ✕），按錯可以復原
+let lastDel = null;
+function deleteItem(n) {
+  if (lastDel) URL.revokeObjectURL(lastDel.it.url);
+  const [it] = images.splice(n, 1);
+  if (!it) return;
+  it.ai = false;
+  lastDel = { it, n };
+  showImgCount(0, [], lastDel);
+  refresh();
+}
+function undoDelete() {
+  if (!lastDel) return;
+  images.splice(Math.min(lastDel.n, images.length), 0, lastDel.it);
+  lastDel = null;
+  showImgCount(0, []);
+  refresh();
 }
 
 // ---------- AI 看圖取品名 ----------
@@ -691,7 +715,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27.5';
+const APP_VERSION = '2026-10-27.6';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -774,7 +798,7 @@ function refresh() {
       ? `<td><input type="text" class="nm sz" size="5" id="z${n}" placeholder="例 200×90×85" aria-label="第 ${n + 1} 項尺寸"></td><td><input type="text" class="nm" size="5" id="mt${n}" placeholder="例 灰色布面" aria-label="第 ${n + 1} 項材質"></td>`
       : `<td><input class="num" size="2" id="q${n}" inputmode="decimal" aria-label="第 ${n + 1} 項數量"></td>`
         + `<td><input class="num price" size="4" id="p${n}" inputmode="decimal" placeholder="未填" aria-label="第 ${n + 1} 項單價"><div class="amt" id="a${n}"></div></td>`)
-    + `<td><div class="thumbs"><figure><img src="${thumbOf(i)}" data-k="${esc(i.url)}" alt=""><figcaption title="${esc(i.name)}">${esc(i.name)}</figcaption></figure></div></td></tr>`).join('');
+    + `<td><div class="thumbs"><button type="button" class="del" data-n="${n}" aria-label="刪除第 ${n + 1} 項" title="刪除這張">✕</button><figure><img src="${thumbOf(i)}" data-k="${esc(i.url)}" alt=""><figcaption title="${esc(i.name)}">${esc(i.name)}</figcaption></figure></div></td></tr>`).join('');
   items.forEach((img, n) => {
     const box = $('nm' + n);
     box.addEventListener('input', () => { img.label = box.value; img.edited = true; updateNames(); });
@@ -840,6 +864,7 @@ function dragEnd(apply) {
   if (apply && !moveItem(from, ins > from ? ins - 1 : ins)) refresh();
 }
 $('rows').addEventListener('pointerup', () => dragEnd(true));
+$('rows').addEventListener('click', e => { const b = e.target.closest('.del'); if (b) deleteItem(+b.dataset.n); });
 $('rows').addEventListener('pointercancel', () => dragEnd(false));
 $('rows').addEventListener('keydown', e => {
   const h = e.target.closest('.drag');
