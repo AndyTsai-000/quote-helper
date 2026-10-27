@@ -131,7 +131,7 @@ button.go.small{width:auto;font-size:14px;padding:8px 16px;margin-top:0}
 
 <div class="wrap" id="app">
   <h1>估價單小幫手</h1>
-  <p class="sub">放入圖片或圖片資料夾，<span id="subName">品名用圖片檔名，可以直接修改</span>，產生 Excel 估價單、PPT 簡報或 Word 估價單。可以放自己的範本（Excel、PDF 或 PPT），照範本的樣子做。檔案也可以直接拖進這個頁面。</p>
+  <p class="sub">放入圖片或圖片資料夾，<span id="subName">品名用圖片檔名，可以直接修改</span>，產生 Excel 估價單或 PPT 簡報。可以放自己的範本（Excel、PDF 或 PPT），照範本的樣子做。檔案也可以直接拖進這個頁面。</p>
 
   <div class="grid">
     <div class="steps">
@@ -140,7 +140,6 @@ button.go.small{width:auto;font-size:14px;padding:8px 16px;margin-top:0}
         <div class="field"><span>檔案類型</span><select id="qFmt">
           <option value="xlsx" selected>Excel 估價單</option>
           <option value="pptx">PPT 簡報</option>
-          <option value="docx">Word 估價單</option>
         </select></div>
         <div class="field" id="tplPick"><span>範本 <small>（可不放）</small></span><label class="mini"><input type="file" id="tplFile" accept=".xlsx,.xlsm,.pdf,.pptx,.xls,.ppt,.ods,.odp,.numbers,.key">選 Excel／PDF／PPT</label></div>
         <div class="builtin" id="tplBuiltin" hidden></div>
@@ -409,7 +408,6 @@ const isTitleLine = l => /估價|報價|請款|訂購/.test(flat(l)) && flat(l).
 const PDF_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 const LIBS = {
   pptx: ['https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js', () => window.PptxGenJS],
-  docx: ['https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js', () => window.docx],
   jszip: ['https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js', () => window.JSZip],
   pdf: ['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', () => window.pdfjsLib],
   heic: ['https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js', () => window.heic2any],
@@ -699,7 +697,7 @@ async function processThumbs() {
 const parseNum = s => { const v = parseFloat(String(s ?? '').replace(/[,，\s$＄NT元]/gi, '')); return Number.isFinite(v) ? v : null; };
 const qtyOf = img => parseNum(img.qty) ?? 1;
 const priceOf = img => parseNum(img.price);
-// 規格欄（Excel／Word）放尺寸和材質；PPT 品名下面那行小字
+// 規格欄（Excel）放尺寸和材質；PPT 品名下面那行小字
 // PPT 品名下面條列（照使用者 2026-10-27 改過的李公館簡報）：一行「尺寸：…」、一行「材質：…」，沒填的不寫
 const detailLines = img => [(img.size || '').trim() && '尺寸：' + img.size.trim(), (img.spec || '').trim() && '材質：' + img.spec.trim()].filter(Boolean);
 const detailOf = img => detailLines(img).join('\n');
@@ -771,7 +769,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27.15';
+const APP_VERSION = '2026-10-27.16';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -2145,85 +2143,6 @@ async function fillPptx() {
   return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
 }
 
-// ---------- 產生 Word ----------
-async function buildDocx() {
-  const D = await loadLib('docx');
-  const spec = currentSpec(), tax = $('qTax').value === '1';
-  const H = Math.min(+$('size').value, 120);
-  const cols = tpl ? spec.cols : spec.cols.filter(c => ['index', 'image', 'name', 'spec', 'qty', 'price', 'amount'].includes(c.role));
-  const N = cols.length, items = quoteItems();
-  const FONT = 'Microsoft JhengHei';
-  const TW = { index: 700, image: 2400, name: 2200, spec: 1600, qty: 800, unit: 700, price: 1200, amount: 1300, other: 1300 }; // 單位 twip
-  let widths = cols.map(c => TW[c.role]);
-  const sum = widths.reduce((a, b) => a + b, 0), AVAIL = 10100;
-  if (sum > AVAIL) widths = widths.map(w => Math.floor(w * AVAIL / sum));
-  const iImg = cols.findIndex(c => c.role === 'image'), iAmt = cols.findIndex(c => c.role === 'amount');
-  const MAXW = Math.floor(widths[iImg] / 15) - 12;
-  const C = D.AlignmentType.CENTER, R = D.AlignmentType.RIGHT;
-  const txt = (text, o = {}) => new D.Paragraph({ alignment: o.align || D.AlignmentType.LEFT, children: [new D.TextRun({ text: String(text), bold: o.bold, size: o.size, font: FONT })] });
-  const cell = (children, i, o = {}) => new D.TableCell({
-    children: Array.isArray(children) ? children : [children], verticalAlign: D.VerticalAlign.CENTER,
-    width: { size: widths.slice(i, i + (o.span || 1)).reduce((a, b) => a + b, 0), type: D.WidthType.DXA },
-    columnSpan: o.span, shading: o.fill ? { fill: o.fill, type: D.ShadingType.CLEAR, color: 'auto' } : undefined,
-    margins: { top: 60, bottom: 60, left: 80, right: 80 },
-  });
-
-  const rows = [new D.TableRow({ tableHeader: true, children: cols.map((c, i) => cell(txt(c.name, { bold: true, align: C }), i, { fill: 'E3F1E8' })) })];
-  for (let i = 0; i < items.length; i++) {
-    showMsg(`處理圖片 ${i + 1} / ${items.length}…`);
-    let pic = txt('');
-    try {
-      const p = await prepImage(await srcOf(items[i]), H);
-      const k = Math.min(1, MAXW / p.w);
-      pic = new D.Paragraph({ alignment: C, children: [new D.ImageRun({ data: p.buffer, transformation: { width: Math.round(p.w * k), height: Math.round(p.h * k) } })] });
-    } catch {}
-    rows.push(new D.TableRow({ cantSplit: true, children: cols.map((c, j) => {
-      if (c.role === 'image') return cell(pic, j);
-      if (c.role === 'spec') { const ls = specLines(items[i]).split('\n'); return cell(ls.map(l => txt(l)), j); } // 跟 Excel 一樣：尺寸、材質各一行
-      const it = items[i], pr = priceOf(it), num = v => v == null ? '' : Math.round(v).toLocaleString('en-US');
-      const v = c.role === 'index' ? i + 1 : c.role === 'name' ? labelOf(it) : c.role === 'qty' ? qtyOf(it) : c.role === 'unit' && !tpl ? '件'
-        : c.role === 'price' ? num(pr) : c.role === 'amount' ? num(pr == null ? null : pr * qtyOf(it)) : '';
-      return cell(txt(v, { align: ['index', 'qty', 'unit'].includes(c.role) ? C : ['price', 'amount'].includes(c.role) ? R : undefined }), j);
-    }) }));
-  }
-  if (iAmt > 0) {
-    // 網頁上有填單價就算好；都沒填就留空讓人手寫
-    const priced = items.some(it => priceOf(it) != null);
-    const sub = items.reduce((s, it) => s + (priceOf(it) ?? 0) * qtyOf(it), 0), taxV = tax ? Math.round(sub * 0.05) : 0;
-    const show = v => priced ? Math.round(v).toLocaleString('en-US') : '';
-    const total = (label, v) => new D.TableRow({ children: [
-      cell(txt(label, { bold: label === '總計', align: R }), 0, { span: iAmt }), cell(txt(show(v), { bold: label === '總計', align: R }), iAmt),
-      ...(iAmt < N - 1 ? [cell(txt(''), iAmt + 1, { span: N - 1 - iAmt })] : []),
-    ] });
-    rows.push(total('小計', sub));
-    if (tax) rows.push(total('營業稅 5%', taxV));
-    rows.push(total('總計', sub + taxV));
-  }
-
-  const head = spec.head.map((line, i) => {
-    const big = i === 0 && !isTitleLine(line), title = isTitleLine(line);
-    return txt(line, { bold: big || title, size: big ? 36 : title ? 30 : undefined, align: big || title ? C : undefined });
-  });
-  const info = infoParts(spec);
-  const infoPara = info.client && info.date
-    ? [new D.Paragraph({ tabStops: [{ type: D.TabStopType.RIGHT, position: 10000 }], children: [new D.TextRun({ text: info.client, font: FONT }), new D.TextRun({ text: '\t' + info.date, font: FONT })] })]
-    : [info.client, info.date].filter(Boolean).map(t => txt(t));
-  const doc = new D.Document({
-    styles: { default: { document: { run: { font: FONT, size: 22 } } } },
-    sections: [{
-      properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 1000, bottom: 1000, left: 900, right: 900 } } },
-      children: [
-        ...head, txt(''), ...infoPara, ...(infoPara.length ? [txt('')] : []),
-        new D.Table({ rows, width: { size: widths.reduce((a, b) => a + b, 0), type: D.WidthType.DXA }, columnWidths: widths }),
-        txt(''),
-        ...spec.notes.map(l => txt(l)),
-        ...(spec.sign ? [txt(''), new D.Paragraph({ tabStops: [{ type: D.TabStopType.LEFT, position: 5500 }], children: [new D.TextRun({ text: '報價人：', font: FONT }), new D.TextRun({ text: '\t客戶簽名：', font: FONT })] })] : []),
-      ],
-    }],
-  });
-  return D.Packer.toBlob(doc);
-}
-
 // ---------- 下載 ----------
 let downloads; // 在 Claude 裡開啟時用平台的下載功能
 if (window.claude?.use) window.claude.use('downloads').then(d => downloads = d).catch(() => {});
@@ -2246,7 +2165,7 @@ $('go').addEventListener('click', async () => {
   try {
     const fmt = $('qFmt').value;
     fillNote = '';
-    const blob = await (fmt === 'pptx' ? buildPptx() : fmt === 'docx' ? buildDocx() : buildXlsx());
+    const blob = await (fmt === 'pptx' ? buildPptx() : buildXlsx());
     const client = $('qClient').value.trim().replace(/[\\/:*?"<>|]/g, '');
     const done = await save(blob, `${fmt === 'pptx' ? '簡報' : '估價單'}${client ? '_' + client : ''}_${todayStr('')}.${fmt}`);
     showMsg(fillNote ? done + '　' + fillNote : done, /沒有放進去/.test(fillNote));
