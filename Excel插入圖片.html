@@ -153,7 +153,7 @@ button.go.small{width:auto;font-size:14px;padding:8px 16px;margin-top:0}
       <section class="card" id="s2">
         <div class="step-h"><span class="num">2</span>圖片</div>
         <label class="pick"><input type="file" id="files" accept="image/*" multiple>點這裡選擇 <b>圖檔</b>（可一次選多張）</label>
-        <div class="alt">或 <label for="folder">選擇圖片資料夾</label><input type="file" id="folder" webkitdirectory multiple>　再選一次會加在原本的後面</div>
+        <div class="alt">或 <label for="folder">選擇圖片資料夾</label><input type="file" id="folder" webkitdirectory multiple>　再選一次會加進清單，依空間自動排好</div>
         <div class="picked" id="imgName"></div>
         <div class="field"><span>圖片處理</span><select id="imgProc">
           <option value="none">原圖</option>
@@ -700,7 +700,6 @@ const parseNum = s => { const v = parseFloat(String(s ?? '').replace(/[,，\s$�
 const qtyOf = img => parseNum(img.qty) ?? 1;
 const priceOf = img => parseNum(img.price);
 // 規格欄（Excel／Word）放尺寸和材質；PPT 品名下面那行小字
-const specText = img => [img.size, img.spec].map(x => (x || '').trim()).filter(Boolean).join('　');
 // PPT 品名下面條列（照使用者 2026-10-27 改過的李公館簡報）：一行「尺寸：…」、一行「材質：…」，沒填的不寫
 const detailLines = img => [(img.size || '').trim() && '尺寸：' + img.size.trim(), (img.spec || '').trim() && '材質：' + img.spec.trim()].filter(Boolean);
 const detailOf = img => detailLines(img).join('\n');
@@ -772,7 +771,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27.14';
+const APP_VERSION = '2026-10-27.15';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -850,7 +849,7 @@ function refresh() {
   $('sum').innerHTML += '<span class="pill" id="sumTotal" hidden></span>';
   const ppt = $('qFmt').value === 'pptx'; // PPT 簡報：數量、單價換成尺寸、材質
   $('thA').textContent = ppt ? '尺寸' : '數量'; $('thB').textContent = ppt ? '材質' : '單價';
-  $('rows').innerHTML = items.map((i, n) => `<tr><td class="r"><button type="button" class="drag" data-n="${n}" aria-label="拖曳或按上下鍵調整第 ${n + 1} 項的順序" title="按住拖曳調整順序">⠿</button>${n + 1}</td><td><input type="text" class="nm" size="6" id="nm${n}" aria-label="第 ${n + 1} 項品名"><div class="ai-wait" hidden>AI 看圖中…</div>${ppt ? '' : `<input type="text" class="nm spec" size="6" id="sp${n}" placeholder="規格（可不填）" aria-label="第 ${n + 1} 項規格">`}<select class="rm" id="rm${n}" aria-label="第 ${n + 1} 項的空間" title="PPT 同空間的放同一頁">${ROOMS.map(r => `<option>${r}</option>`).join('')}</select></td>`
+  $('rows').innerHTML = items.map((i, n) => `<tr><td class="r"><button type="button" class="drag" data-n="${n}" aria-label="拖曳或按上下鍵調整第 ${n + 1} 項的順序" title="按住拖曳調整順序">⠿</button>${n + 1}</td><td><input type="text" class="nm" size="6" id="nm${n}" aria-label="第 ${n + 1} 項品名"><div class="ai-wait" hidden>AI 看圖中…</div>${ppt ? '' : `<input type="text" class="nm spec" size="6" id="sp${n}" placeholder="規格" aria-label="第 ${n + 1} 項規格">`}<select class="rm" id="rm${n}" aria-label="第 ${n + 1} 項的空間" title="清單依空間排序；PPT 同空間的放同一頁">${ROOMS.map(r => `<option>${r}</option>`).join('')}</select></td>`
     + (ppt
       ? `<td><input type="text" class="nm sz" size="5" id="z${n}" placeholder="例 200×90×85" aria-label="第 ${n + 1} 項尺寸"></td><td><input type="text" class="nm" size="5" id="mt${n}" placeholder="例 灰色布面" aria-label="第 ${n + 1} 項材質"></td>`
       : `<td><input class="num" size="2" id="q${n}" inputmode="decimal" aria-label="第 ${n + 1} 項數量"></td>`
@@ -942,7 +941,6 @@ function updateNames() {
     const put = (id, v) => { const el = $(id + n); if (el && document.activeElement !== el) el.value = v; };
     put('sp', img.spec || ''); put('mt', img.spec || ''); put('z', img.size || '');
     const rm = $('rm' + n);
-    rm.hidden = $('qFmt').value !== 'pptx';
     if (document.activeElement !== rm) rm.value = roomOf(img);
     put('q', img.qty ?? 1); put('p', img.price ?? '');
   });
@@ -2181,9 +2179,10 @@ async function buildDocx() {
     } catch {}
     rows.push(new D.TableRow({ cantSplit: true, children: cols.map((c, j) => {
       if (c.role === 'image') return cell(pic, j);
+      if (c.role === 'spec') { const ls = specLines(items[i]).split('\n'); return cell(ls.map(l => txt(l)), j); } // 跟 Excel 一樣：尺寸、材質各一行
       const it = items[i], pr = priceOf(it), num = v => v == null ? '' : Math.round(v).toLocaleString('en-US');
       const v = c.role === 'index' ? i + 1 : c.role === 'name' ? labelOf(it) : c.role === 'qty' ? qtyOf(it) : c.role === 'unit' && !tpl ? '件'
-        : c.role === 'price' ? num(pr) : c.role === 'amount' ? num(pr == null ? null : pr * qtyOf(it)) : c.role === 'spec' ? specText(it) : '';
+        : c.role === 'price' ? num(pr) : c.role === 'amount' ? num(pr == null ? null : pr * qtyOf(it)) : '';
       return cell(txt(v, { align: ['index', 'qty', 'unit'].includes(c.role) ? C : ['price', 'amount'].includes(c.role) ? R : undefined }), j);
     }) }));
   }
