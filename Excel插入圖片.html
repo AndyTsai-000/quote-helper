@@ -177,7 +177,7 @@ button.go.small{width:auto;font-size:14px;padding:8px 16px;margin-top:0}
       <div class="step-h" style="margin-bottom:8px">品項<span class="tag" id="sample">範例</span></div>
       <div class="sum" id="sum"></div>
       <div class="tbl"><table>
-        <thead><tr><th>項次</th><th>品名</th><th>數量</th><th>單價</th><th>圖片</th></tr></thead>
+        <thead><tr><th>項次</th><th>品名</th><th id="thA">數量</th><th id="thB">單價</th><th>圖片</th></tr></thead>
         <tbody id="rows"></tbody>
       </table></div>
     </section>
@@ -615,6 +615,9 @@ async function processThumbs() {
 const parseNum = s => { const v = parseFloat(String(s ?? '').replace(/[,，\s$＄NT元]/gi, '')); return Number.isFinite(v) ? v : null; };
 const qtyOf = img => parseNum(img.qty) ?? 1;
 const priceOf = img => parseNum(img.price);
+// 規格欄（Excel／Word）放尺寸和材質；PPT 品名下面那行小字
+const specText = img => [img.size, img.spec].map(x => (x || '').trim()).filter(Boolean).join('　');
+const detailOf = img => [(img.size || '').trim() && '尺寸 ' + img.size.trim(), (img.spec || '').trim() && '材質 ' + img.spec.trim()].filter(Boolean).join('　');
 const money = v => v == null ? '' : 'NT$ ' + Math.round(v).toLocaleString('en-US');
 function updateTotals() {
   const items = quoteItems();
@@ -622,7 +625,7 @@ function updateTotals() {
   const priced = items.filter(i => priceOf(i) != null);
   const total = priced.reduce((s, i) => s + qtyOf(i) * priceOf(i), 0);
   const t = $('sumTotal');
-  if (t) { t.hidden = !priced.length; t.textContent = `合計 ${money(total)}` + (priced.length < items.length ? `（${items.length - priced.length} 項還沒填單價）` : ''); }
+  if (t) { t.hidden = !priced.length || $('qFmt').value === 'pptx'; t.textContent = `合計 ${money(total)}` + (priced.length < items.length ? `（${items.length - priced.length} 項還沒填單價）` : ''); }
 }
 
 // ---------- 記住照片用過的名稱（存在這台電腦的瀏覽器裡） ----------
@@ -654,6 +657,7 @@ function applyMem() {
       if (r.name && r.v >= 2 && !img.edited) { img.label = r.name; img.aiDone = true; img.fromMem = true; }
       if (!img.priceEdited && r.price != null) { img.price = r.price; img.priceFromLib = true; }
       if (!img.specEdited && r.spec) img.spec = r.spec;
+      if (!img.sizeEdited && r.size) img.size = r.size;
       if (!img.roomEdited && r.room) img.room = r.room;
     }
     const p = memByName.get(nameKey(labelOf(img)));
@@ -665,10 +669,10 @@ async function memSave(items) {
     // 品名是 AI 取的、自己改的或之前記住的才記；只是檔名代替的不記，免得下次擋掉 AI 取名
     const real = img.edited || img.aiDone || img.fromMem;
     const name = real ? labelOf(img).trim() : '';
-    const price = priceOf(img), spec = (img.spec || '').trim();
-    if (!name && price == null && !spec) continue;
+    const price = priceOf(img), spec = (img.spec || '').trim(), size = (img.size || '').trim();
+    if (!name && price == null && !spec && !size) continue;
     const old = memCache.get(await hashOf(img));
-    await Store.put('memory', { v: 2, hash: img.hash, name: name || (old?.v >= 2 ? old.name : '') || '', price, room: img.room || '', spec, updated: Date.now() });
+    await Store.put('memory', { v: 2, hash: img.hash, name: name || (old?.v >= 2 ? old.name : '') || '', price, room: img.room || '', spec, size, updated: Date.now() });
   }
   await memLoad();
 }
@@ -680,7 +684,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27.4';
+const APP_VERSION = '2026-10-27.5';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -703,7 +707,7 @@ function reportText() {
   lines.push(`圖片處理：${$('imgProc').selectedOptions[0].text}　AI 取名：${sampler ? ($('aiOn').checked ? '開' : '關') : '不能用'}（${aiReason}）`);
   lines.push(`AI 訊息：${$('aiMsg').textContent || '（沒有）'}`);
   lines.push(`品項（${items.length}）：`);
-  items.forEach((img, n) => lines.push(`  ${n + 1}. ${img.name} → ${labelOf(img)}｜數量 ${qtyOf(img)}｜單價 ${priceOf(img) ?? '未填'}${(img.spec || '').trim() ? '｜規格 ' + img.spec.trim() : ''}${img.room ? '｜' + img.room : ''}${img.fromMem ? '｜照片記憶' : ''}`));
+  items.forEach((img, n) => lines.push(`  ${n + 1}. ${img.name} → ${labelOf(img)}｜數量 ${qtyOf(img)}｜單價 ${priceOf(img) ?? '未填'}${(img.size || '').trim() ? '｜尺寸 ' + img.size.trim() : ''}${(img.spec || '').trim() ? '｜規格 ' + img.spec.trim() : ''}${img.room ? '｜' + img.room : ''}${img.fromMem ? '｜照片記憶' : ''}`));
   lines.push(`最後的訊息：${$('msg').textContent || '（沒有）'}`);
   if (errLog.length) lines.push('錯誤：', ...errLog.slice(-5).map(e => '  ' + e));
   return lines.join('\n');
@@ -756,18 +760,25 @@ function refresh() {
   $('sum').innerHTML = `<span class="pill">${items.length} 個品項</span>`
     + (items.length > slots ? `<span class="pill">範本有 ${slots} 個位置，超過的會自動新增一頁</span>` : '');
   $('sum').innerHTML += '<span class="pill" id="sumTotal" hidden></span>';
-  $('rows').innerHTML = items.map((i, n) => `<tr><td class="r"><button type="button" class="drag" data-n="${n}" aria-label="拖曳或按上下鍵調整第 ${n + 1} 項的順序" title="按住拖曳調整順序">⠿</button>${n + 1}</td><td><input type="text" class="nm" size="6" id="nm${n}" aria-label="第 ${n + 1} 項品名"><div class="ai-wait" hidden>AI 看圖中…</div><input type="text" class="nm spec" size="6" id="sp${n}" placeholder="規格（可不填）" aria-label="第 ${n + 1} 項規格"><select class="rm" id="rm${n}" aria-label="第 ${n + 1} 項的空間" title="PPT 同空間的放同一頁">${ROOMS.map(r => `<option>${r}</option>`).join('')}</select></td>`
-    + `<td><input class="num" size="2" id="q${n}" inputmode="decimal" aria-label="第 ${n + 1} 項數量"></td>`
-    + `<td><input class="num price" size="4" id="p${n}" inputmode="decimal" placeholder="未填" aria-label="第 ${n + 1} 項單價"><div class="amt" id="a${n}"></div></td>`
+  const ppt = $('qFmt').value === 'pptx'; // PPT 簡報：數量、單價換成尺寸、材質
+  $('thA').textContent = ppt ? '尺寸' : '數量'; $('thB').textContent = ppt ? '材質' : '單價';
+  $('rows').innerHTML = items.map((i, n) => `<tr><td class="r"><button type="button" class="drag" data-n="${n}" aria-label="拖曳或按上下鍵調整第 ${n + 1} 項的順序" title="按住拖曳調整順序">⠿</button>${n + 1}</td><td><input type="text" class="nm" size="6" id="nm${n}" aria-label="第 ${n + 1} 項品名"><div class="ai-wait" hidden>AI 看圖中…</div>${ppt ? '' : `<input type="text" class="nm spec" size="6" id="sp${n}" placeholder="規格（可不填）" aria-label="第 ${n + 1} 項規格">`}<select class="rm" id="rm${n}" aria-label="第 ${n + 1} 項的空間" title="PPT 同空間的放同一頁">${ROOMS.map(r => `<option>${r}</option>`).join('')}</select></td>`
+    + (ppt
+      ? `<td><input type="text" class="nm sz" size="5" id="z${n}" placeholder="例 200×90×85" aria-label="第 ${n + 1} 項尺寸"></td><td><input type="text" class="nm" size="5" id="mt${n}" placeholder="例 灰色布面" aria-label="第 ${n + 1} 項材質"></td>`
+      : `<td><input class="num" size="2" id="q${n}" inputmode="decimal" aria-label="第 ${n + 1} 項數量"></td>`
+        + `<td><input class="num price" size="4" id="p${n}" inputmode="decimal" placeholder="未填" aria-label="第 ${n + 1} 項單價"><div class="amt" id="a${n}"></div></td>`)
     + `<td><div class="thumbs"><figure><img src="${thumbOf(i)}" data-k="${esc(i.url)}" alt=""><figcaption title="${esc(i.name)}">${esc(i.name)}</figcaption></figure></div></td></tr>`).join('');
   items.forEach((img, n) => {
     const box = $('nm' + n);
     box.addEventListener('input', () => { img.label = box.value; img.edited = true; updateNames(); });
     box.addEventListener('change', () => { applyMem(); updateNames(); }); // 改好品名後，產品庫有同名的就帶入單價
     $('rm' + n).addEventListener('change', e => { img.room = e.target.value; img.roomEdited = true; });
-    $('sp' + n).addEventListener('input', e => { img.spec = e.target.value; img.specEdited = true; });
-    $('q' + n).addEventListener('input', e => { img.qty = e.target.value; updateTotals(); });
-    $('p' + n).addEventListener('input', e => { img.price = e.target.value; img.priceEdited = true; img.priceFromLib = false; updateTotals(); });
+    const on = (id, fn) => $(id + n)?.addEventListener('input', e => fn(e.target.value));
+    on('sp', v => { img.spec = v; img.specEdited = true; });
+    on('mt', v => { img.spec = v; img.specEdited = true; }); // 材質＝規格
+    on('z', v => { img.size = v; img.sizeEdited = true; });
+    on('q', v => { img.qty = v; updateTotals(); });
+    on('p', v => { img.price = v; img.priceEdited = true; img.priceFromLib = false; updateTotals(); });
   });
   updateNames();
 }
@@ -838,14 +849,12 @@ function updateNames() {
     if (!box) return;
     if (document.activeElement !== box) box.value = img.label;
     box.nextElementSibling.hidden = !img.ai;
-    const sp = $('sp' + n);
-    if (document.activeElement !== sp) sp.value = img.spec || '';
+    const put = (id, v) => { const el = $(id + n); if (el && document.activeElement !== el) el.value = v; };
+    put('sp', img.spec || ''); put('mt', img.spec || ''); put('z', img.size || '');
     const rm = $('rm' + n);
     rm.hidden = $('qFmt').value !== 'pptx';
     if (document.activeElement !== rm) rm.value = roomOf(img);
-    const q = $('q' + n), p = $('p' + n);
-    if (document.activeElement !== q) q.value = img.qty ?? 1;
-    if (document.activeElement !== p) p.value = img.price ?? '';
+    put('q', img.qty ?? 1); put('p', img.price ?? '');
   });
   updateTotals();
 }
@@ -1241,7 +1250,7 @@ async function buildXlsx() {
       const cell = row.getCell(j + 1);
       cell.value = c.role === 'index' ? i + 1 : c.role === 'name' ? labelOf(img) : c.role === 'qty' ? qtyOf(img)
         : c.role === 'price' ? priceOf(img)
-        : c.role === 'spec' ? (img.spec || '').trim() || null
+        : c.role === 'spec' ? specText(img) || null
         : c.role === 'unit' && !tpl ? '件'
         : c.role === 'amount' && cQty && cPrice ? { formula: `IF(${L(cPrice)}${rr}="","",${L(cQty)}${rr}*${L(cPrice)}${rr})` } : null;
       cell.border = box;
@@ -1491,7 +1500,7 @@ async function fillBlocks(wb, ws, t, rows, items, used, doneBefore) {
     // 只填空白的格子
     const put = (c, v) => { if (!c) return; const cell = ws.getCell(r, c).master; if (isBlank(cell)) cell.value = v; };
     put(cIdx, used + i + 1);
-    const spec = (img.spec || '').trim();
+    const spec = specText(img);
     put(cName, nameHasSpec && spec ? `${labelOf(img)}　${spec}` : labelOf(img));
     if (spec) { if (cSpec) put(cSpec, spec); else if (cNote) put(cNote, spec); }
     put(cQty, qtyOf(img));
@@ -1580,7 +1589,8 @@ async function buildPptx() {
     s.background = { color: 'FFFFFF' };
     s.addText(pg.title, { x: 0.6, y: 0.35, w: 12.13, h: 0.8, fontFace: FONT, fontSize: 28, bold: true, color: INK });
     s.addShape(pres.ShapeType.line, { x: 0.6, y: 1.2, w: 12.13, h: 0, line: { color: GREEN, width: 2 } });
-    const cells = gridCells({ x: 0.6, y: 1.5, w: 12.13, h: 5.65 }, pg.items.length, 0.5, 0.35);
+    const more = pg.items.some(detailOf);
+    const cells = gridCells({ x: 0.6, y: 1.5, w: 12.13, h: 5.65 }, pg.items.length, more ? 0.85 : 0.5, 0.35);
     for (let j = 0; j < pg.items.length; j++) {
       const img = pg.items[j];
       showMsg(`處理圖片 ${++done} / ${items.length}…`);
@@ -1588,7 +1598,9 @@ async function buildPptx() {
         const p = await prepImage(await srcOf(img), 720);
         s.addImage({ data: await toDataURL(p.buffer, p.extension), ...fitBottom(cells[j], p.w, p.h) });
       } catch {}
-      s.addText(labelOf(img), { ...cells[j].cap, fontFace: FONT, fontSize: 16, color: INK, align: 'center', valign: 'top' });
+      const sub = detailOf(img);
+      s.addText(sub ? [{ text: labelOf(img), options: { fontSize: 16, color: INK, breakLine: true } }, { text: sub, options: { fontSize: 12, color: GREY } }] : labelOf(img),
+        { ...cells[j].cap, fontFace: FONT, fontSize: 16, color: INK, align: 'center', valign: 'top' });
     }
   }
   // 產生 PPT 的套件會登記幾個不存在的母片，PowerPoint 可能因此要修復，先清掉
@@ -1723,7 +1735,7 @@ async function fillPptx() {
     return { doc, rels, rpr, obstacles: [...obstacles, ...fixed.filter(b => b && area(b) < AREA * 0.5)] };
   }
 
-  function textBox(doc, id, b, text, rpr, sz, bold, algn) {
+  function textBox(doc, id, b, text, rpr, sz, bold, algn, sub) {
     const node = doc.importNode(parseXml(`<p:sp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvSpPr><p:cNvPr id="${id}" name="文字 ${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${R(b.x)}" y="${R(b.y)}"/><a:ext cx="${R(b.w)}" cy="${R(b.h)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="${bold ? 'ctr' : 't'}"><a:normAutofit/></a:bodyPr><a:lstStyle/><a:p><a:pPr algn="${algn}"/><a:r><a:rPr lang="zh-TW"/><a:t></a:t></a:r></a:p></p:txBody></p:sp>`).documentElement, true);
     aEls(node, 't')[0].textContent = text;
     if (rpr) aEls(node, 'rPr')[0].replaceWith(doc.importNode(parseXml(rpr).documentElement, true));
@@ -1734,6 +1746,12 @@ async function fillPptx() {
     const fill = [...r.children].find(c => c.localName === 'solidFill');
     const clr = fill?.firstElementChild, white = clr && ((clr.localName === 'srgbClr' && /^F{6}$/i.test(clr.getAttribute('val'))) || (clr.localName === 'schemeClr' && /^(bg1|lt1)$/.test(clr.getAttribute('val'))));
     if (white && protoHasPhoto) fill.remove();
+    if (sub) { // 第二行小字：尺寸、材質
+      const p2 = aEls(node, 'p')[0].cloneNode(true);
+      aEls(p2, 't')[0].textContent = sub;
+      aEls(p2, 'rPr')[0].setAttribute('sz', String(Math.round(sz * 0.72)));
+      node.getElementsByTagNameNS(NS.p, 'txBody')[0].appendChild(p2);
+    }
     return node;
   }
   function picNode(doc, id, rid, b) {
@@ -1758,7 +1776,8 @@ async function fillPptx() {
     const box = { x: free.x + pad, y: free.y + pad, w: free.w - pad * 2, h: free.h - pad * 2 };
     const titleH = Math.min(CY * 0.1, box.h * 0.16), gap = Math.min(CX, CY) * 0.03;
     const body = { x: box.x, y: box.y + titleH + gap * 0.6, w: box.w, h: box.h - titleH - gap * 0.6 };
-    const capH = Math.min(CY * 0.065, body.h * 0.16);
+    const more = pg.items.some(detailOf); // 有尺寸或材質就留兩行
+    const capH = more ? Math.min(CY * 0.11, body.h * 0.26) : Math.min(CY * 0.065, body.h * 0.16);
     const cells = gridCells(body, pg.items.length, capH, gap);
     const pt = emu => Math.round(emu / 12700);
     tree.appendChild(textBox(doc, nextId++, { x: box.x, y: box.y, w: box.w, h: titleH }, pg.title, rpr, Math.min(3200, Math.max(1600, pt(titleH) * 60)), true, 'l'));
@@ -1775,7 +1794,7 @@ async function fillPptx() {
         rels.documentElement.appendChild(rel);
         tree.appendChild(picNode(doc, nextId++, rid, fitBottom(cells[j], p.w, p.h)));
       } catch {}
-      tree.appendChild(textBox(doc, nextId++, cells[j].cap, labelOf(img), rpr, Math.min(1800, Math.max(1000, pt(capH) * 55)), false, 'ctr'));
+      tree.appendChild(textBox(doc, nextId++, cells[j].cap, labelOf(img), rpr, Math.min(1800, Math.max(1000, pt(capH) * (more ? 32 : 55))), false, 'ctr', detailOf(img)));
     }
 
     const path = `ppt/slides/slide${++slideNum}.xml`;
@@ -1848,7 +1867,7 @@ async function buildDocx() {
       if (c.role === 'image') return cell(pic, j);
       const it = items[i], pr = priceOf(it), num = v => v == null ? '' : Math.round(v).toLocaleString('en-US');
       const v = c.role === 'index' ? i + 1 : c.role === 'name' ? labelOf(it) : c.role === 'qty' ? qtyOf(it) : c.role === 'unit' && !tpl ? '件'
-        : c.role === 'price' ? num(pr) : c.role === 'amount' ? num(pr == null ? null : pr * qtyOf(it)) : c.role === 'spec' ? (it.spec || '').trim() : '';
+        : c.role === 'price' ? num(pr) : c.role === 'amount' ? num(pr == null ? null : pr * qtyOf(it)) : c.role === 'spec' ? specText(it) : '';
       return cell(txt(v, { align: ['index', 'qty', 'unit'].includes(c.role) ? C : ['price', 'amount'].includes(c.role) ? R : undefined }), j);
     }) }));
   }
