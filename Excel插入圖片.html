@@ -142,7 +142,7 @@ button.go.small{width:auto;font-size:14px;padding:8px 16px;margin-top:0}
           <option value="pptx">PPT 簡報</option>
           <option value="docx">Word 估價單</option>
         </select></div>
-        <div class="field" id="tplPick"><span>範本 <small>（可不放）</small></span><label class="mini"><input type="file" id="tplFile" accept=".xlsx,.xlsm,.pdf,.pptx">選 Excel／PDF／PPT</label></div>
+        <div class="field" id="tplPick"><span>範本 <small>（可不放）</small></span><label class="mini"><input type="file" id="tplFile" accept=".xlsx,.xlsm,.pdf,.pptx,.xls,.ppt,.ods,.odp,.numbers,.key">選 Excel／PDF／PPT</label></div>
         <div class="builtin" id="tplBuiltin" hidden></div>
         <div class="tplinfo" id="tplInfo" hidden></div>
         <div class="field" id="companyField"><span>公司名稱</span><input type="text" id="qCompany" placeholder="例：好家居設計"></div>
@@ -201,8 +201,8 @@ button.go.small{width:auto;font-size:14px;padding:8px 16px;margin-top:0}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
-const IMG_EXT = /\.(jpe?g|png|gif|webp|bmp)$/i;
-const TPL_EXT = /\.(xlsx|xlsm|pdf|pptx)$/i;
+const IMG_EXT = /\.(jpe?g|png|gif|webp|bmp|heic|heif)$/i;
+const TPL_EXT = /\.(xlsx|xlsm|pdf|pptx|xls|ppt|ods|odp|numbers|key)$/i; // 舊格式也收，讀的時候說明怎麼另存
 const EMU = 9525; // 1 像素 = 9525 EMU
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 let images = [], tpl = null; // tpl = { kind, name, buf, spec }
@@ -368,6 +368,7 @@ const LIBS = {
   docx: ['https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js', () => window.docx],
   jszip: ['https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js', () => window.JSZip],
   pdf: ['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', () => window.pdfjsLib],
+  heic: ['https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js', () => window.heic2any],
 };
 function loadLib(k) {
   const [src, get] = LIBS[k];
@@ -381,7 +382,20 @@ function loadLib(k) {
 
 // ---------- 圖片 ----------
 // 新選的圖片加在原本的後面，已經有的（同檔名、同大小）不重複加
+// iPhone 的 HEIC 照片：Windows 的瀏覽器看不懂，先轉成 JPG
+async function fromHeic(f) {
+  const h = await loadLib('heic');
+  const out = await h({ blob: f, toType: 'image/jpeg', quality: 0.9 });
+  return new File([Array.isArray(out) ? out[0] : out], stemOf(f.name) + '.jpg', { type: 'image/jpeg' });
+}
 async function addImages(list) {
+  const heic = list.filter(f => /\.(heic|heif)$/i.test(f.name));
+  if (heic.length) {
+    showMsg(`轉換 ${heic.length} 張 iPhone 照片（HEIC）…`);
+    let bad = 0;
+    list = (await Promise.all(list.map(async f => { if (!heic.includes(f)) return f; try { return await fromHeic(f); } catch { bad++; return null; } }))).filter(Boolean);
+    showMsg(bad ? `有 ${bad} 張 HEIC 照片轉不過來，可以在 iPhone 設定「相機 → 格式 → 最相容」，或先轉成 JPG。` : '', !!bad);
+  }
   const key = f => f.name + '|' + f.size;
   const seen = new Set(images.map(i => key(i.file)));
   const pics = list.filter(f => IMG_EXT.test(f.name));
@@ -708,7 +722,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27.7';
+const APP_VERSION = '2026-10-27.8';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -957,16 +971,151 @@ const Store = {
 function saveTpl() { if (tpl?.fixed) Store.set('tpl', { kind: tpl.kind, name: tpl.name, buf: tpl.buf, spec: tpl.spec }); }
 
 // ---------- 讀範本 ----------
+// ---------- 不同電腦、不同版本的檔案 ----------
+// 舊格式和 Mac 格式讀不了，告訴使用者怎麼另存
+const SAVE_X = '請用 Excel 打開，按「檔案 → 另存新檔」，存檔類型選「Excel 活頁簿（*.xlsx）」再放進來。';
+const SAVE_P = '請用 PowerPoint 打開，按「檔案 → 另存新檔」，存檔類型選「PowerPoint 簡報（*.pptx）」再放進來。';
+const OLD_FMT = {
+  xls: '這是舊版 Excel（97-2003）的 .xls 檔。' + SAVE_X,
+  ods: '這是 OpenOffice／LibreOffice 的試算表。請用它「另存新檔」成 Excel 2007-365（.xlsx）再放進來。',
+  numbers: '這是 Mac 的 Numbers 檔。請在 Numbers 按「檔案 → 輸出至 → Excel」，存成 .xlsx 再放進來。',
+  ppt: '這是舊版 PowerPoint（97-2003）的 .ppt 檔。' + SAVE_P,
+  odp: '這是 OpenOffice／LibreOffice 的簡報。請用它「另存新檔」成 PowerPoint 2007-365（.pptx）再放進來。',
+  key: '這是 Mac 的 Keynote 檔。請在 Keynote 按「檔案 → 輸出至 → PowerPoint」，存成 .pptx 再放進來。',
+  doc: 'Word 檔不能當範本。範本請用 Excel、PDF 或 PPT；也可以把 Word 範本「另存新檔」成 PDF 再放進來。',
+  docx: 'Word 檔不能當範本。範本請用 Excel、PDF 或 PPT；也可以把 Word 範本「另存新檔」成 PDF 再放進來。',
+  pages: '這是 Mac 的 Pages 檔，不能當範本。請在 Pages 按「檔案 → 輸出至 → PDF」再放進來。',
+  odt: '這是 OpenOffice 的文件，不能當範本。請另存成 PDF 再放進來。',
+};
+// Excel「Strict Open XML」格式的命名和一般 .xlsx 不同，先換成一般格式再處理
+const STRICT_NS = [
+  ['/relationships/extendedProperties', '/relationships/extended-properties'],
+  ['/relationships/customProperties', '/relationships/custom-properties'],
+  ['http://purl.oclc.org/ooxml/officeDocument/relationships', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'],
+  ['http://purl.oclc.org/ooxml/officeDocument/extendedProperties', 'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties'],
+  ['http://purl.oclc.org/ooxml/officeDocument/customProperties', 'http://schemas.openxmlformats.org/officeDocument/2006/custom-properties'],
+  ['http://purl.oclc.org/ooxml/officeDocument/docPropsVTypes', 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes'],
+  ['http://purl.oclc.org/ooxml/officeDocument/sharedTypes', 'http://schemas.openxmlformats.org/officeDocument/2006/sharedTypes'],
+  ['http://purl.oclc.org/ooxml/officeDocument/math', 'http://schemas.openxmlformats.org/officeDocument/2006/math'],
+  ['http://purl.oclc.org/ooxml/spreadsheetml/main', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'],
+  ['http://purl.oclc.org/ooxml/presentationml/main', 'http://schemas.openxmlformats.org/presentationml/2006/main'],
+  ['http://purl.oclc.org/ooxml/wordprocessingml/main', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'],
+  ['http://purl.oclc.org/ooxml/drawingml/main', 'http://schemas.openxmlformats.org/drawingml/2006/main'],
+  ['http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing', 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'],
+  ['http://purl.oclc.org/ooxml/drawingml/chart', 'http://schemas.openxmlformats.org/drawingml/2006/chart'],
+  ['http://purl.oclc.org/ooxml/drawingml/picture', 'http://schemas.openxmlformats.org/drawingml/2006/picture'],
+  ['http://purl.oclc.org/ooxml/drawingml/diagram', 'http://schemas.openxmlformats.org/drawingml/2006/diagram'],
+];
+async function normalizeOoxml(buf, ext) {
+  const h = new Uint8Array(buf.slice(0, 4));
+  if (h[0] === 0xD0 && h[1] === 0xCF && h[2] === 0x11 && h[3] === 0xE0) // 加密或舊格式改了副檔名
+    throw new Error('這個檔案有密碼保護，或其實是舊格式。請在 Office 打開、移除密碼（檔案 → 資訊 → 保護）後，「另存新檔」成 .xlsx／.pptx 再放進來。');
+  if (!(h[0] === 0x50 && h[1] === 0x4B)) throw new Error('這個檔案讀不出來，可能已經損毀。請用 Office 打開後「另存新檔」再試。');
+  const JSZip = await loadLib('jszip');
+  const z = await JSZip.loadAsync(buf.slice(0));
+  const main = z.file('xl/workbook.xml') || z.file('ppt/presentation.xml');
+  if (!main) throw new Error(ext === 'pptx' ? '這個檔案不是 PPT 簡報。' : '這個檔案不是 Excel 活頁簿。');
+  if (!(await main.async('string')).includes('purl.oclc.org/ooxml')) return buf;
+  for (const f of Object.keys(z.files).filter(f => /\.(xml|rels)$/i.test(f))) {
+    let s = await z.file(f).async('string');
+    if (!s.includes('purl.oclc.org/ooxml')) continue;
+    for (const [a, b] of STRICT_NS) s = s.split(a).join(b);
+    z.file(f, s.replace(/ conformance="strict"/g, ''));
+  }
+  return z.generateAsync({ type: 'arraybuffer' });
+}
+
+// ExcelJS 存檔會把範本裡的文字框、圖形、線條弄丟：存完再從範本補回去（範本插過列的話位置跟著往下移）
+// 圖表、SmartArt 沒辦法補，回傳數量讓畫面提醒
+async function keepShapes(tplBuf, outBuf, shifts) {
+  const JSZip = await loadLib('jszip');
+  const [a, b] = await Promise.all([JSZip.loadAsync(tplBuf.slice(0)), JSZip.loadAsync(outBuf)]);
+  const SML = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', XDR = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing';
+  const sheetsOf = async z => {
+    const wbx = parseXml(await z.file('xl/workbook.xml').async('string')), rels = parseXml(await z.file('xl/_rels/workbook.xml.rels').async('string'));
+    const out = {};
+    for (const s of wbx.getElementsByTagNameNS(SML, 'sheet')) {
+      const rel = relsOf(rels).find(r => r.getAttribute('Id') === s.getAttributeNS(NS.r, 'id'));
+      if (rel) out[s.getAttribute('name')] = resolvePath('xl/workbook.xml', rel.getAttribute('Target'));
+    }
+    return out;
+  };
+  const A = await sheetsOf(a), B = await sheetsOf(b);
+  const ct = parseXml(await b.file('[Content_Types].xml').async('string'));
+  let kept = 0, lost = 0;
+  for (const [name, pa] of Object.entries(A)) {
+    const pb = B[name];
+    const ra = a.file(relsPath(pa)) && parseXml(await a.file(relsPath(pa)).async('string'));
+    const dRel = ra && relsOf(ra).find(r => /\/drawing$/.test(r.getAttribute('Type')));
+    if (!pb || !dRel) continue;
+    const dDoc = parseXml(await a.file(resolvePath(pa, dRel.getAttribute('Target'))).async('string'));
+    const anchors = [];
+    for (const an of [...dDoc.documentElement.children]) {
+      const obj = [...an.children].find(c => ['sp', 'grpSp', 'cxnSp', 'graphicFrame', 'pic', 'contentPart'].includes(c.localName));
+      if (!obj || obj.localName === 'pic') continue; // 圖片 ExcelJS 自己會保留
+      // 用到其他檔案（圖表、圖片填滿、超連結）的補不回來
+      const refs = [...an.getElementsByTagName('*')].some(e => [...e.attributes].some(at => at.namespaceURI === NS.r));
+      if (obj.localName === 'graphicFrame' || obj.localName === 'contentPart' || refs) { lost++; continue; }
+      for (const tag of ['from', 'to']) {
+        const row = an.getElementsByTagNameNS(XDR, tag)[0]?.getElementsByTagNameNS(XDR, 'row')[0];
+        if (!row) continue;
+        let r0 = +row.textContent;
+        for (const s of shifts[name] || []) if (r0 >= s.L) r0 += s.n; // s.L 是插入點上面那列（從 1 算）
+        row.textContent = String(r0);
+      }
+      anchors.push(an);
+    }
+    if (!anchors.length) continue;
+    // 輸出檔裡這張工作表的 drawing：有就加在後面，沒有就新建一個
+    const rbPath = relsPath(pb);
+    const rb = b.file(rbPath) ? parseXml(await b.file(rbPath).async('string')) : parseXml(`<Relationships xmlns="${REL_NS}"/>`);
+    let dbRel = relsOf(rb).find(r => /\/drawing$/.test(r.getAttribute('Type'))), dbPath, dbDoc;
+    if (dbRel) { dbPath = resolvePath(pb, dbRel.getAttribute('Target')); dbDoc = parseXml(await b.file(dbPath).async('string')); }
+    else {
+      let k = 1; while (b.file(`xl/drawings/drawing${k}.xml`)) k++;
+      dbPath = `xl/drawings/drawing${k}.xml`;
+      dbDoc = parseXml(`<xdr:wsDr xmlns:xdr="${XDR}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"/>`);
+      const rel = rb.createElementNS(REL_NS, 'Relationship');
+      rel.setAttribute('Id', 'rIdShapes1'); rel.setAttribute('Type', REL_T + 'drawing'); rel.setAttribute('Target', `../drawings/drawing${k}.xml`);
+      rb.documentElement.appendChild(rel);
+      b.file(rbPath, xmlStr(rb));
+      const o = ct.createElementNS(CT_NS, 'Override');
+      o.setAttribute('PartName', '/' + dbPath); o.setAttribute('ContentType', 'application/vnd.openxmlformats-officedocument.drawing+xml');
+      ct.documentElement.appendChild(o);
+      // 工作表裡加 <drawing r:id>，要放在規定的位置（pageSetup、headerFooter、分頁之後）
+      const sx = parseXml(await b.file(pb).async('string')), root = sx.documentElement;
+      const d = sx.createElementNS(SML, 'drawing');
+      d.setAttributeNS(NS.r, 'r:id', 'rIdShapes1');
+      const after = ['legacyDrawing', 'legacyDrawingHF', 'drawingHF', 'picture', 'oleObjects', 'controls', 'webPublishItems', 'tableParts', 'extLst'];
+      root.insertBefore(d, [...root.children].find(c => after.includes(c.localName)) || null);
+      b.file(pb, xmlStr(sx));
+    }
+    let id = Math.max(0, ...[...dbDoc.getElementsByTagNameNS(XDR, 'cNvPr')].map(e => +e.getAttribute('id') || 0));
+    for (const an of anchors) {
+      const node = dbDoc.importNode(an, true);
+      [...node.getElementsByTagNameNS(XDR, 'cNvPr')].forEach(e => e.setAttribute('id', String(++id)));
+      dbDoc.documentElement.appendChild(node);
+      kept++;
+    }
+    b.file(dbPath, xmlStr(dbDoc));
+  }
+  if (!kept) return { buf: outBuf, kept, lost };
+  b.file('[Content_Types].xml', xmlStr(ct));
+  return { buf: await b.generateAsync({ type: 'arraybuffer' }), kept, lost };
+}
+
 async function loadTemplate(file) {
   const ext = (file.name.match(/\.([^.]+)$/) || [])[1]?.toLowerCase();
   showMsg('讀取範本…');
   try {
-    const buf = await file.arrayBuffer();
+    if (OLD_FMT[ext]) throw new Error(OLD_FMT[ext]);
+    let buf = await file.arrayBuffer();
+    if (ext !== 'pdf') buf = await normalizeOoxml(buf, ext);
     let kind, spec;
     if (ext === 'xlsx' || ext === 'xlsm') { kind = 'xlsx'; spec = await specFromXlsx(buf); }
     else if (ext === 'pdf') { kind = 'pdf'; spec = await specFromPdf(buf); }
     else if (ext === 'pptx') { kind = 'pptx'; spec = await specFromPptx(buf); }
-    else throw new Error('範本只能用 Excel（.xlsx）、PDF 或 PPT（.pptx）。舊的 .xls、.ppt 請先另存新檔。');
+    else throw new Error('範本只能用 Excel（.xlsx）、PDF 或 PPT（.pptx）。');
     tpl = { kind, name: file.name, buf, spec, ask: true }; // 問要不要設成固定範本
     if (kind === 'xlsx' || kind === 'pptx') $('qFmt').value = kind;
     else if ($('qFmt').value === 'pptx') $('qFmt').value = 'xlsx';
@@ -1435,6 +1584,7 @@ function insertRows(ws, L, n, srcTop, b) {
   }
   imgs.forEach(m => { m.range.tl.nativeRow += n; if (m.range.br) m.range.br.nativeRow += n; });
   if (ws.pageSetup.printArea) ws.pageSetup.printArea = shiftRefs(ws.pageSetup.printArea, L, n);
+  (ws.__shifts = ws.__shifts || []).push({ L, n }); // 補回範本的圖形時，位置要跟著往下移
 }
 
 // 範本有好幾張工作表（例如依品項數量做好的不同版本）：選剛好放得下的那張，都不夠就選最大的
@@ -1505,7 +1655,16 @@ async function fillXlsxTemplate() {
     done += chunk.length;
   }
   if (done < all.length) fillNote = `範本只有 ${done} 個品項位置，後面 ${all.length - done} 項沒有放進去。`;
-  return new Blob([await wb.xlsx.writeBuffer()], { type: XLSX_TYPE });
+  // 範本裡的文字框、圖形、線條補回去
+  const shapeShifts = {};
+  wb.worksheets.forEach(s => { if (s.__shifts) shapeShifts[s.name] = s.__shifts; });
+  let out = await wb.xlsx.writeBuffer();
+  try {
+    const ks = await keepShapes(tpl.buf, out, shapeShifts);
+    out = ks.buf;
+    if (ks.lost) fillNote += `範本裡有 ${ks.lost} 個圖表或特殊物件沒辦法保留，請打開檔案確認。`;
+  } catch (e) { errLog.push('keepShapes: ' + (e?.message || e)); }
+  return new Blob([out], { type: XLSX_TYPE });
 }
 
 // 把品項填進一張工作表的品項位置
