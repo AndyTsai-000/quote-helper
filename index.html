@@ -729,7 +729,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27.8';
+const APP_VERSION = '2026-10-27.9';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -1569,6 +1569,9 @@ function insertRows(ws, L, n, srcTop, b) {
   }));
   const merges = Object.values(ws._merges).map(m => ({ top: m.top, left: m.left, bottom: m.bottom, right: m.right }));
   const below = merges.filter(m => m.top > L);
+  // 解除合併會把合併格裡其他格的框線清掉（例如右邊、下面的框線），先記下來，移好再放回去
+  const kept = [];
+  below.forEach(m => { for (let r = m.top; r <= m.bottom; r++) for (let c = m.left; c <= m.right; c++) kept.push([r + n, c, clone(ws.getCell(r, c).style)]); });
   below.forEach(m => ws.unMergeCells(m.top, m.left, m.bottom, m.right));
   const inBlock = merges.filter(m => m.top >= srcTop && m.bottom <= L);
   const imgs = ws.getImages().filter(m => m.range?.tl && m.range.tl.nativeRow >= L);
@@ -1576,7 +1579,8 @@ function insertRows(ws, L, n, srcTop, b) {
   ws.eachRow({ includeEmpty: true }, row => row.eachCell(cell => {
     if (isFormula(cell)) cell.value = { formula: shiftRefs(cell.formula, L, n), result: cell.result };
   }));
-  below.forEach(m => ws.mergeCells(m.top + n, m.left, m.bottom + n, m.right));
+  below.forEach(m => ws.mergeCellsWithoutStyle(m.top + n, m.left, m.bottom + n, m.right));
+  kept.forEach(([r, c, s]) => { ws.getCell(r, c).style = s; });
   for (let r = L + 1; r <= L + n; r++) {
     const src = srcTop + (r - L - 1) % b, row = ws.getRow(r), from = ws.getRow(src);
     row.height = from.height;
@@ -1587,7 +1591,8 @@ function insertRows(ws, L, n, srcTop, b) {
     });
   }
   for (let start = L + 1; start <= L + n; start += b) {
-    inBlock.forEach(m => ws.mergeCells(m.top - srcTop + start, m.left, m.bottom - srcTop + start, m.right));
+    // 不套用左上格的格式，每一格保留從範本複製來的框線
+    inBlock.forEach(m => ws.mergeCellsWithoutStyle(m.top - srcTop + start, m.left, m.bottom - srcTop + start, m.right));
   }
   imgs.forEach(m => { m.range.tl.nativeRow += n; if (m.range.br) m.range.br.nativeRow += n; });
   if (ws.pageSetup.printArea) ws.pageSetup.printArea = shiftRefs(ws.pageSetup.printArea, L, n);
