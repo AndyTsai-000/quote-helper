@@ -222,11 +222,20 @@ function cellText(cell) {
   try { return cell.text ?? ''; } catch { return String(cell.value ?? ''); }
 }
 
-// 檔名去掉前後的編號，例如「01_沙發-2.jpg」→「沙發」
+// 檔名去掉前後的編號和「複製」字樣，例如「01_沙發-2.jpg」「沙發 - 複製 (3).jpg」「Copy of 沙發(1).jpg」→「沙發」
+const COPY_WORD = '(?:複製|複本|副本|拷貝|copy)';
 function itemName(name) {
   const s = stemOf(name).trim();
-  const t = s.replace(/^\d+[\s._\-、）)]+/, '').replace(/(?:[\s_\-]\d{1,2}|\s*[（(]\d{1,2}[)）])$/, '').trim();
-  return t || s;
+  let t = s, prev;
+  do {
+    prev = t;
+    t = t.replace(/^\d+[\s._\-、）)]+/, '')
+      .replace(new RegExp(`^(?:${COPY_WORD}\\s*(?:of\\s+)?|${COPY_WORD}\\s*[-_]\\s*)`, 'i'), '')
+      .replace(new RegExp(`[\\s_\\-－–]*[（(]?\\s*的?\\s*${COPY_WORD}\\s*\\d*\\s*[)）]?$`, 'i'), '')
+      .replace(/(?:[\s_\-－–]\d{1,2}|\s*[（(]\s*\d{1,3}\s*[)）])$/, '')
+      .trim();
+  } while (t && t !== prev);
+  return t || '未命名'; // 檔名只有「(1)」「複製」這類字
 }
 const labelOf = img => (img.label || '').trim() || itemName(img.name);
 
@@ -722,7 +731,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27.9';
+const APP_VERSION = '2026-10-27.10';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
