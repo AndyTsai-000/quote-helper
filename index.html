@@ -715,7 +715,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27.6';
+const APP_VERSION = '2026-10-27.7';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -1731,18 +1731,31 @@ async function fillPptx() {
   const protoRels = zip.file(relsPath(proto.path)) ? await zip.file(relsPath(proto.path)).async('string') : `<Relationships xmlns="${REL_NS}"/>`;
   const protoHasPhoto = kids(parseXml(protoXml)).some(e => e.localName === 'pic' && area(xfrmOf(e)) > AREA * 0.15);
 
+  // 看得見的物件才要避開：沒填色、沒框線、沒文字的空白框（範本裡常有）不算
+  function seen(e) {
+    if (e.localName !== 'sp') return true;
+    // 文字要看得見才算（範本網站常在母片藏一行設成「無填滿」的浮水印字）
+    if (aEls(e, 'r').some(r => r.textContent.trim() && ![...(aEls(r, 'rPr')[0]?.children || [])].some(c => c.localName === 'noFill'))) return true;
+    const sp = e.getElementsByTagNameNS(NS.p, 'spPr')[0], kidsP = sp ? [...sp.children] : [];
+    const style = e.getElementsByTagNameNS(NS.p, 'style')[0];
+    const ref = n => { const x = style && style.getElementsByTagNameNS(NS.a, n)[0]; return x && x.getAttribute('idx') !== '0'; };
+    const fill = kidsP.some(c => /^(solidFill|gradFill|blipFill|pattFill)$/.test(c.localName)) || (!kidsP.some(c => c.localName === 'noFill') && ref('fillRef'));
+    const ln = kidsP.find(c => c.localName === 'ln');
+    const line = ln ? ![...ln.children].some(c => c.localName === 'noFill') && ln.children.length > 0 : ref('lnRef');
+    return fill || line;
+  }
   // 版面配置和母片上的固定圖形（Logo、色條）也要避開
   const fixed = [];
   const layoutRel = relsOf(parseXml(protoRels)).find(r => r.getAttribute('Type') === REL_T + 'slideLayout');
   if (layoutRel) {
     const lp = resolvePath(proto.path, layoutRel.getAttribute('Target')), ld = await read(lp);
     if (ld) {
-      kids(ld).filter(e => !phType(e)).forEach(e => fixed.push(xfrmOf(e)));
+      kids(ld).filter(e => !phType(e) && seen(e)).forEach(e => fixed.push(xfrmOf(e)));
       const lr = await read(relsPath(lp));
       const mRel = lr && relsOf(lr).find(r => r.getAttribute('Type') === REL_T + 'slideMaster');
       const showMaster = ld.documentElement.getAttribute('showMasterSp') !== '0' && parseXml(protoXml).documentElement.getAttribute('showMasterSp') !== '0';
       const md = showMaster && mRel && await read(resolvePath(lp, mRel.getAttribute('Target')));
-      if (md) kids(md).filter(e => !phType(e)).forEach(e => fixed.push(xfrmOf(e)));
+      if (md) kids(md).filter(e => !phType(e) && seen(e)).forEach(e => fixed.push(xfrmOf(e)));
     }
   }
 
@@ -1759,7 +1772,7 @@ async function fillPptx() {
       const b = xfrmOf(e), t = phType(e), keepPh = ['sldNum', 'dt', 'ftr'].includes(t);
       const content = !keepPh && (t || hasText(e) || e.localName === 'graphicFrame' || (e.localName === 'pic' && area(b) > AREA * 0.04));
       if (content || (minimal && !keepPh && area(b) < AREA * 0.5 && !(e.localName === 'pic' && area(b) < AREA * 0.04))) { e.remove(); continue; }
-      if (b && area(b) < AREA * 0.5) obstacles.push(b);
+      if (b && area(b) < AREA * 0.5 && seen(e)) obstacles.push(b);
     }
     doc.getElementsByTagNameNS(NS.p, 'timing')[0]?.remove(); // 範本的動畫指著拿掉的東西
     [...doc.getElementsByTagNameNS(P14, 'creationId')].forEach(e => e.setAttribute('val', String(Math.floor(Math.random() * 4294967295))));
@@ -1798,21 +1811,30 @@ async function fillPptx() {
   for (let pi = 0; pi < pages.length; pi++) {
     const pg = pages[pi];
     let base = await baseSlide(pi + 1, false), free = largestFree(base.obstacles, CX, CY);
-    if (area(free) < AREA * 0.3) { base = await baseSlide(pi + 1, true); free = largestFree(base.obstacles, CX, CY); }
+    // 裝飾佔掉一半以上就改用乾淨的頁面（只留 Logo）
+    if (area(free) < AREA * 0.45) { base = await baseSlide(pi + 1, true); free = largestFree(base.obstacles, CX, CY); }
     const { doc, rels, rpr } = base;
     const tree = doc.getElementsByTagNameNS(NS.p, 'spTree')[0];
     let nextId = Math.max(1, ...[...doc.getElementsByTagNameNS(NS.p, 'cNvPr')].map(e => +e.getAttribute('id') || 0)) + 1;
 
     // 空白區留邊：上方放空間名稱，下面排圖片和品名
-    const pad = Math.min(free.w, free.h) * 0.05;
-    const box = { x: free.x + pad, y: free.y + pad, w: free.w - pad * 2, h: free.h - pad * 2 };
-    const titleH = Math.min(CY * 0.1, box.h * 0.16), gap = Math.min(CX, CY) * 0.03;
-    const body = { x: box.x, y: box.y + titleH + gap * 0.6, w: box.w, h: box.h - titleH - gap * 0.6 };
+    // 排版照使用者 2026-10-27 改過的簡報：空間名稱在左上角（右上角有 Logo 就同一排、不重疊），
+    // 品項緊接在標題下面往下排，圖片約頁高 28%、品名加尺寸材質兩行約 10%
+    const pad = Math.min(free.w, free.h) * 0.02, gap = Math.min(CX, CY) * 0.03;
+    const hits = b => base.obstacles.some(o => b.x < o.x + o.w && o.x < b.x + b.w && b.y < o.y + o.h && o.y < b.y + b.h);
+    const titleH = CY * 0.076, tx = free.x + pad, tw = Math.min(free.w - pad * 2, CX * 0.45);
+    let ty = 0;
+    while (ty < free.y + pad && hits({ x: tx, y: ty, w: tw, h: titleH })) ty += CY * 0.01;
+    ty = Math.min(ty, free.y + pad);
+    const top = Math.max(ty + titleH + CY * 0.018, free.y + pad), bottom = free.y + free.h - pad;
     const more = pg.items.some(detailOf); // 有尺寸或材質就留兩行
-    const capH = more ? Math.min(CY * 0.11, body.h * 0.26) : Math.min(CY * 0.065, body.h * 0.16);
-    const cells = gridCells(body, pg.items.length, capH, gap);
+    const capH = more ? CY * 0.1 : CY * 0.065;
+    const n = pg.items.length, cols = n <= 1 ? 1 : n === 2 ? 2 : n === 3 ? ((free.w - pad * 2) / (bottom - top) > 1.6 ? 3 : 2) : 2, rows = Math.ceil(n / cols);
+    const rowH = Math.min((bottom - top - gap * (rows - 1)) / rows, CY * 0.28 + capH);
+    const body = { x: free.x + pad, y: top, w: free.w - pad * 2, h: rowH * rows + gap * (rows - 1) };
+    const cells = gridCells(body, n, capH, gap);
     const pt = emu => Math.round(emu / 12700);
-    tree.appendChild(textBox(doc, nextId++, { x: box.x, y: box.y, w: box.w, h: titleH }, pg.title, rpr, Math.min(3200, Math.max(1600, pt(titleH) * 60)), true, 'l'));
+    tree.appendChild(textBox(doc, nextId++, { x: tx, y: ty, w: Math.max(tw, body.w), h: titleH }, pg.title, rpr, Math.min(3200, Math.max(1600, pt(titleH) * 60)), true, 'l'));
     for (let j = 0; j < pg.items.length; j++) {
       const img = pg.items[j];
       showMsg(`處理圖片 ${++done} / ${items.length}…`);
