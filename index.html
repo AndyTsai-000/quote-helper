@@ -671,7 +671,9 @@ const qtyOf = img => parseNum(img.qty) ?? 1;
 const priceOf = img => parseNum(img.price);
 // 規格欄（Excel／Word）放尺寸和材質；PPT 品名下面那行小字
 const specText = img => [img.size, img.spec].map(x => (x || '').trim()).filter(Boolean).join('　');
-const detailOf = img => [(img.size || '').trim() && '尺寸 ' + img.size.trim(), (img.spec || '').trim() && '材質 ' + img.spec.trim()].filter(Boolean).join('　');
+// PPT 品名下面條列（照使用者 2026-10-27 改過的李公館簡報）：一行「尺寸：…」、一行「材質：…」，沒填的不寫
+const detailLines = img => [(img.size || '').trim() && '尺寸：' + img.size.trim(), (img.spec || '').trim() && '材質：' + img.spec.trim()].filter(Boolean);
+const detailOf = img => detailLines(img).join('\n');
 const money = v => v == null ? '' : 'NT$ ' + Math.round(v).toLocaleString('en-US');
 function updateTotals() {
   const items = quoteItems();
@@ -738,7 +740,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27.10';
+const APP_VERSION = '2026-10-27.11';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -1794,8 +1796,8 @@ async function buildPptx() {
     s.background = { color: 'FFFFFF' };
     s.addText(pg.title, { x: 0.6, y: 0.35, w: 12.13, h: 0.8, fontFace: FONT, fontSize: 28, bold: true, color: INK });
     s.addShape(pres.ShapeType.line, { x: 0.6, y: 1.2, w: 12.13, h: 0, line: { color: GREEN, width: 2 } });
-    const more = pg.items.some(detailOf);
-    const cells = gridCells({ x: 0.6, y: 1.5, w: 12.13, h: 5.65 }, pg.items.length, more ? 0.85 : 0.5, 0.35);
+    const lines = Math.max(0, ...pg.items.map(i => detailLines(i).length));
+    const cells = gridCells({ x: 0.6, y: 1.5, w: 12.13, h: 5.65 }, pg.items.length, [0.5, 0.85, 1.1][lines], 0.35);
     for (let j = 0; j < pg.items.length; j++) {
       const img = pg.items[j];
       showMsg(`處理圖片 ${++done} / ${items.length}…`);
@@ -1803,8 +1805,8 @@ async function buildPptx() {
         const p = await prepImage(await srcOf(img), 720);
         s.addImage({ data: await toDataURL(p.buffer, p.extension), ...fitBottom(cells[j], p.w, p.h) });
       } catch {}
-      const sub = detailOf(img);
-      s.addText(sub ? [{ text: labelOf(img), options: { fontSize: 16, color: INK, breakLine: true } }, { text: sub, options: { fontSize: 12, color: GREY } }] : labelOf(img),
+      const sub = detailLines(img);
+      s.addText(sub.length ? [{ text: labelOf(img), options: { fontSize: 16, color: INK, breakLine: true } }, ...sub.map((t, k) => ({ text: t, options: { fontSize: 12, color: GREY, breakLine: k < sub.length - 1 } }))] : labelOf(img),
         { ...cells[j].cap, fontFace: FONT, fontSize: 16, color: INK, align: 'center', valign: 'top' });
     }
   }
@@ -1964,9 +1966,9 @@ async function fillPptx() {
     const fill = [...r.children].find(c => c.localName === 'solidFill');
     const clr = fill?.firstElementChild, white = clr && ((clr.localName === 'srgbClr' && /^F{6}$/i.test(clr.getAttribute('val'))) || (clr.localName === 'schemeClr' && /^(bg1|lt1)$/.test(clr.getAttribute('val'))));
     if (white && protoHasPhoto) fill.remove();
-    if (sub) { // 第二行小字：尺寸、材質
+    for (const line of sub || []) { // 下面每行一項小字：尺寸、材質
       const p2 = aEls(node, 'p')[0].cloneNode(true);
-      aEls(p2, 't')[0].textContent = sub;
+      aEls(p2, 't')[0].textContent = line;
       aEls(p2, 'rPr')[0].setAttribute('sz', String(Math.round(sz * 0.72)));
       node.getElementsByTagNameNS(NS.p, 'txBody')[0].appendChild(p2);
     }
@@ -2000,8 +2002,8 @@ async function fillPptx() {
     while (ty < free.y + pad && hits({ x: tx, y: ty, w: tw, h: titleH })) ty += CY * 0.01;
     ty = Math.min(ty, free.y + pad);
     const top = Math.max(ty + titleH + CY * 0.018, free.y + pad), bottom = free.y + free.h - pad;
-    const more = pg.items.some(detailOf); // 有尺寸或材質就留兩行
-    const capH = more ? CY * 0.1 : CY * 0.065;
+    const lines = Math.max(0, ...pg.items.map(i => detailLines(i).length)), more = lines > 0; // 有尺寸、材質就多留幾行
+    const capH = CY * [0.065, 0.1, 0.12][lines];
     const n = pg.items.length, cols = n <= 1 ? 1 : n === 2 ? 2 : n === 3 ? ((free.w - pad * 2) / (bottom - top) > 1.6 ? 3 : 2) : 2, rows = Math.ceil(n / cols);
     const rowH = Math.min((bottom - top - gap * (rows - 1)) / rows, CY * 0.28 + capH);
     const body = { x: free.x + pad, y: top, w: free.w - pad * 2, h: rowH * rows + gap * (rows - 1) };
@@ -2021,7 +2023,7 @@ async function fillPptx() {
         rels.documentElement.appendChild(rel);
         tree.appendChild(picNode(doc, nextId++, rid, fitBottom(cells[j], p.w, p.h)));
       } catch {}
-      tree.appendChild(textBox(doc, nextId++, cells[j].cap, labelOf(img), rpr, Math.min(1800, Math.max(1000, pt(capH) * (more ? 32 : 55))), false, 'ctr', detailOf(img)));
+      tree.appendChild(textBox(doc, nextId++, cells[j].cap, labelOf(img), rpr, Math.min(1800, Math.max(1000, pt(more ? CY * 0.1 : capH) * (more ? 32 : 55))), false, 'ctr', detailLines(img)));
     }
 
     const path = `ppt/slides/slide${++slideNum}.xml`;
