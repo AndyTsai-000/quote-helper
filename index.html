@@ -740,7 +740,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27.11';
+const APP_VERSION = '2026-10-27.12';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -1442,12 +1442,13 @@ async function buildXlsx() {
       const cell = row.getCell(j + 1);
       cell.value = c.role === 'index' ? i + 1 : c.role === 'name' ? labelOf(img) : c.role === 'qty' ? qtyOf(img)
         : c.role === 'price' ? priceOf(img)
-        : c.role === 'spec' ? specText(img) || null
+        : c.role === 'spec' ? detailOf(img) || null
         : c.role === 'unit' && !tpl ? '件'
         : c.role === 'amount' && cQty && cPrice ? { formula: `IF(${L(cPrice)}${rr}="","",${L(cQty)}${rr}*${L(cPrice)}${rr})` } : null;
       cell.border = box;
       cell.alignment = { vertical: 'middle', horizontal: ['index', 'qty', 'unit'].includes(c.role) ? 'center' : ['price', 'amount'].includes(c.role) ? 'right' : 'left', wrapText: true };
       if (c.role === 'price' || c.role === 'amount') cell.numFmt = money;
+      if ((c.role === 'name' || c.role === 'spec') && cell.value) fitFont(ws, cell);
     });
     const p = prepared[i];
     if (p) ws.addImage(wb.addImage({ buffer: p.buffer, extension: p.extension }), placeAt(ws, cImg, 1, rr, p.w, p.h));
@@ -1501,10 +1502,28 @@ function cellBox(ws, r, c) {
   const top = m ? m.top : r, left = m ? m.left : c, bottom = m ? m.bottom : r, right = m ? m.right : c;
   return { top, left, widths: range(left, right).map(k => colPx(ws, k)), heights: range(top, bottom).map(k => rowPx(ws, k)) };
 }
+// 文字多就把字縮小到剛好塞進格子（含合併範圍）；最大是格子原本的字級，最小 7。hFrac：圖片也放在同一格時文字只能用上面一部分
+// 換行照「全形字一個字寬、半形約半個字寬」估算
+// 回傳字級、文字佔的高度（pt）、塞不塞得下
+function fontFor(box, text, base, hFrac = 1) {
+  const w = sum(box.widths) * 0.75 - 6, h = sum(box.heights) * 0.75 * hFrac - 4;
+  const lines = String(text ?? '').split('\n');
+  const width = l => [...l].reduce((a, ch) => a + (/[\x00-\xff]/.test(ch) ? 0.55 : 1), 0);
+  const need = s => w <= 0 ? Infinity : lines.reduce((n, l) => n + Math.max(1, Math.ceil(width(l) * s / w)), 0) * s * 1.3;
+  let sz = base;
+  while (sz > 7 && need(sz) > h) sz -= 0.5;
+  return { sz, used: need(sz), fits: need(sz) <= h };
+}
+function fitFont(ws, cell, hFrac = 1, valign) {
+  const f = fontFor(cellBox(ws, cell.row, cell.col), cell.value, cell.font?.size || 11, hFrac);
+  // 換一個新的格式物件，範本裡格式相同的格子共用同一個，直接改會改到別格
+  cell.style = { ...cell.style, font: { ...(cell.font || {}), size: f.sz }, alignment: { ...(cell.alignment || {}), wrapText: true, ...(valign ? { vertical: valign } : {}) } };
+  return f;
+}
 // 圖片放進這一格（置中，bottom 時貼底），左上和右下都綁在格子裡
 function anchorIn(box, w, h, valign) {
   const locate = (v, sizes, start) => { let i = 0; while (i < sizes.length - 1 && v > sizes[i]) { v -= sizes[i]; i++; } return [start - 1 + i, Math.max(0, Math.round(v))]; };
-  const x0 = (sum(box.widths) - w) / 2, y0 = valign === 'bottom' ? sum(box.heights) - h - 4 : (sum(box.heights) - h) / 2;
+  const x0 = (sum(box.widths) - w) / 2, y0 = valign === 'bottom' ? sum(box.heights) - h - 4 : valign === 'top' ? 4 : (sum(box.heights) - h) / 2;
   const [tc, tx] = locate(x0, box.widths, box.left), [bc, bx] = locate(x0 + w, box.widths, box.left);
   const [tr, ty] = locate(y0, box.heights, box.top), [br, by] = locate(y0 + h, box.heights, box.top);
   return {
@@ -1705,18 +1724,36 @@ async function fillBlocks(wb, ws, t, rows, items, used, doneBefore) {
     showMsg(`處理圖片 ${doneBefore + i + 1} / ${total}…`);
     const blk = rows[i], r = blk.top, img = items[i];
     // 只填空白的格子
-    const put = (c, v) => { if (!c) return; const cell = ws.getCell(r, c).master; if (isBlank(cell)) cell.value = v; };
+    const put = (c, v) => { if (!c) return null; const cell = ws.getCell(r, c).master; if (!isBlank(cell)) return null; cell.value = v; return cell; };
     put(cIdx, used + i + 1);
-    const spec = specText(img);
-    put(cName, nameHasSpec && spec ? `${labelOf(img)}　${spec}` : labelOf(img));
-    if (spec) { if (cSpec) put(cSpec, spec); else if (cNote) put(cNote, spec); }
+    const spec = detailOf(img); // 條列：尺寸：…／材質：…各一行
+    const under = ic.underName || ic.col === cName;
+    const nb = ws._merges[ws.getCell(r, ic.col).master.address]?.bottom ?? r; // 品名格的最後一列
+    const imgInName = under && nb >= blk.bottom; // 圖片也放在品名那一格（貼底），文字只能用上面約三成
+    // 「名稱及規格」的品名格只有一列高、塞不下條列時：品名留在品名格，尺寸材質寫在下面圖片格的底部
+    let specBelow = false;
+    if (nameHasSpec && spec && under && !imgInName && cName) {
+      const nc = ws.getCell(r, cName).master, f = fontFor(cellBox(ws, r, cName), `${labelOf(img)}\n${spec}`, nc.font?.size || 11);
+      specBelow = !f.fits || f.sz < 9;
+    }
+    const nameCell = put(cName, nameHasSpec && spec && !specBelow ? `${labelOf(img)}\n${spec}` : labelOf(img));
+    if (nameCell) fitFont(ws, nameCell, imgInName ? 0.3 : 1);
+    let textPx = 0;
+    if (specBelow) {
+      const sc = ws.getCell(nb + 1, ic.col).master;
+      if (isBlank(sc)) {
+        sc.value = spec;
+        sc.style = { ...sc.style, alignment: { ...(sc.alignment || {}), horizontal: 'center' } };
+        textPx = fitFont(ws, sc, 0.4, 'bottom').used / 0.75 + 4;
+      }
+    }
+    if (spec && !nameHasSpec) { const sc = cSpec ? put(cSpec, spec) : cNote ? put(cNote, spec) : null; if (sc) fitFont(ws, sc); }
     put(cQty, qtyOf(img));
     if (cPrice && priceOf(img) != null) put(cPrice, priceOf(img));
     if (cQty && cPrice) put(cAmt, { formula: `IF(${L(cPrice)}${r}="","",${L(cQty)}${r}*${L(cPrice)}${r})` });
     // 圖片的格子：品名和圖片同一欄時，放在品名下面那塊合併格；整組只有一格就貼底，留上面給品名
     let box, bottom = false;
-    if (ic.underName || ic.col === cName) {
-      const nm = ws._merges[ws.getCell(r, ic.col).master.address], nb = nm ? nm.bottom : r;
+    if (under) {
       if (nb < blk.bottom) box = cellBox(ws, nb + 1, ic.col);
       else { box = cellBox(ws, r, ic.col); bottom = true; }
     } else {
@@ -1724,11 +1761,12 @@ async function fillBlocks(wb, ws, t, rows, items, used, doneBefore) {
       if (!isBlank(ws.getCell(box.top, box.left))) continue; // 那格已經有內容，不蓋掉
     }
     // 圖片縮放到剛好放進格子，欄寬列高都不動；欄寬換算成像素只是估計，寬度多留一點
-    const maxW = sum(box.widths) * 0.92 - PAD * 2, maxH = sum(box.heights) * (bottom ? 0.68 : 1) - PAD * 2;
+    // 格子底部寫了尺寸材質時，圖片放在上面、不壓到字
+    const maxW = sum(box.widths) * 0.92 - PAD * 2, maxH = sum(box.heights) * (bottom ? 0.68 : 1) - PAD * 2 - textPx;
     if (maxW < 4 || maxH < 4) continue;
     try {
       const p = await prepImage(await srcOf(img), maxH, maxW);
-      ws.addImage(wb.addImage({ buffer: p.buffer, extension: p.extension }), anchorIn(box, p.w, p.h, bottom ? 'bottom' : ''));
+      ws.addImage(wb.addImage({ buffer: p.buffer, extension: p.extension }), anchorIn(box, p.w, p.h, bottom ? 'bottom' : textPx ? 'top' : ''));
     } catch {}
   }
 
