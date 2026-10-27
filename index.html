@@ -251,7 +251,7 @@ const ROOMS = ['客廳', '餐廳', '臥室', '書房', '廚房', '衛浴', '玄�
 const ROOM_KEYS = [
   ['客廳', /沙發|茶几|電視櫃|邊几|邊桌|單椅|躺椅|主人椅|腳凳|地毯|落地燈/],
   ['餐廳', /餐桌|餐椅|餐邊櫃|餐櫃|酒櫃|吧檯|吧台/],
-  ['臥室', /床|衣櫃|梳妝|化妝|斗櫃|衣架/],
+  ['臥室', /床|衣櫃|梳妝|化妝|斗櫃|床頭櫃|衣架/],
   ['書房', /書桌|書櫃|書架|辦公椅|電腦椅|工作桌/],
   ['廚房', /廚具|流理|冰箱|爐|抽油煙|電器櫃/],
   ['衛浴', /馬桶|浴|洗手|面盆|鏡櫃/],
@@ -271,6 +271,41 @@ function roomPages(items, max = 4) {
     for (let k = 0, part = 1; k < list.length; k += size, part++) pages.push({ title: n > 1 ? `${room}（${part}/${n}）` : room, items: list.slice(k, k + size) });
   }
   return pages;
+}
+// 自動依空間排序：客廳 → 餐廳 → 臥室…，同空間主要家具在前（照 ROOM_KEYS 裡關鍵字的順序，例如沙發 → 茶几 → 電視櫃）
+const KEY_ORDER = Object.fromEntries(ROOM_KEYS.map(([room, re]) => [room, re.source.split('|')]));
+function roomRank(img) {
+  const room = roomOf(img), keys = KEY_ORDER[room] || [], name = labelOf(img);
+  // 用最長的那個關鍵字，「床頭櫃」才不會被當成「床」排在床前面
+  const hit = keys.filter(w => name.includes(w)).sort((a, b) => b.length - a.length)[0], k = hit ? keys.indexOf(hit) : -1;
+  return ROOMS.indexOf(room) * 100 + (k < 0 ? 99 : k);
+}
+// 使用者拖曳排過的（placed）位置不動；其他的照空間插進去。順序有變才回傳 true
+function sortByRoom() {
+  const before = images.slice();
+  const fixed = images.filter(i => i.placed), loose = images.filter(i => !i.placed);
+  const ranked = loose.map((it, n) => ({ it, n, r: roomRank(it) })).sort((a, b) => a.r - b.r || a.n - b.n).map(x => x.it);
+  if (!fixed.length) images = ranked;
+  else {
+    images = fixed.slice();
+    for (const it of ranked) {
+      const r = roomRank(it);
+      let at = images.length;
+      while (at > 0 && roomRank(images[at - 1]) > r) at--;
+      images.splice(at, 0, it);
+    }
+  }
+  return images.some((it, n) => it !== before[n]);
+}
+// 重新排序後清單會重畫，正在打字的那一格要留住游標
+function resort() {
+  const a = document.activeElement, m = a && $('rows').contains(a) && (a.id || '').match(/^([a-z]+)(\d+)$/);
+  const it = m && images[+m[2]], pos = m && a.selectionStart;
+  if (!sortByRoom()) return false;
+  refresh();
+  const el = it && $(m[1] + images.indexOf(it));
+  if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch {} }
+  return true;
 }
 const byName = (a, b) => a.name.localeCompare(b.name, 'en', { numeric: true });
 const quoteItems = () => [...images]; // 照加入的順序
@@ -427,7 +462,8 @@ async function addImages(list) {
   processThumbs();
   // 先比對照片記憶（用過的照片直接帶入上次的品名），剩下的才交給 AI 取名
   await Promise.all(added.map(hashOf));
-  applyMem(); updateNames();
+  applyMem();
+  if (!resort()) updateNames();
   const known = added.filter(i => i.fromMem).length;
   if (known) setAiMsg(`✓ ${known} 張照片用過，已帶入上次的品名`);
   if (sampler && $('aiOn').checked) runAI();
@@ -557,6 +593,7 @@ async function runAI() {
     }
   }
   setAiMsg(`✓ AI 取好 ${done} 個品名，可以在右邊直接修改`);
+  resort(); // AI 判斷出空間後，照空間重新排
 }
 
 function loadBitmap(file) {
@@ -742,7 +779,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27.13';
+const APP_VERSION = '2026-10-27.14';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -829,8 +866,8 @@ function refresh() {
   items.forEach((img, n) => {
     const box = $('nm' + n);
     box.addEventListener('input', () => { img.label = box.value; img.edited = true; updateNames(); });
-    box.addEventListener('change', () => { applyMem(); updateNames(); }); // 改好品名後，產品庫有同名的就帶入單價
-    $('rm' + n).addEventListener('change', e => { img.room = e.target.value; img.roomEdited = true; });
+    box.addEventListener('change', () => { applyMem(); if (!resort()) updateNames(); }); // 改好品名後，產品庫有同名的就帶入單價；空間可能跟著變，重新排
+    $('rm' + n).addEventListener('change', e => { img.room = e.target.value; img.roomEdited = true; img.placed = false; resort(); }); // 換空間就移到那個空間的位置
     const on = (id, fn) => $(id + n)?.addEventListener('input', e => fn(e.target.value));
     on('sp', v => { img.spec = v; img.specEdited = true; });
     on('mt', v => { img.spec = v; img.specEdited = true; }); // 材質＝規格
@@ -845,6 +882,7 @@ function moveItem(from, to) {
   if (from === to || to < 0 || to >= images.length) return false;
   const [it] = images.splice(from, 1);
   images.splice(to, 0, it);
+  images.forEach(i => i.placed = true); // 自己排過的順序，之後自動排序不再動
   refresh();
   return true;
 }
