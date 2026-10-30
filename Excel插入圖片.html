@@ -320,7 +320,7 @@ const ROLE_RE = [
   ['image', /(圖片|照片|圖示|示意|樣式|產品圖|參考圖)/],
   ['qty', /(數量|qty)/i],
   ['unit', /^(單位|unit)$/i],
-  ['price', /(單價|price)/i],
+  ['price', /(單價|優惠價|售價|特價|定價|報價|價格|price)/i],
   ['amount', /(金額|複價|總價|小計|amount)/i],
   // 尺寸、材質各自一欄時分開放；只有一個「規格」欄才合在一起
   ['size', /^((規格)?尺寸(規格)?([(（].{0,6}[)）])?|size|dimensions?)$/i],
@@ -785,7 +785,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-30.3';
+const APP_VERSION = '2026-10-30.4';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -1489,6 +1489,7 @@ async function buildXlsx() {
       const c0 = info.client ? mid + 1 : 1;
       if (c0 <= N) { mergeRow(r, c0, N); Object.assign(ws.getCell(r, c0), { value: info.date, alignment: { horizontal: 'right' } }); }
     }
+    for (let c = 1; c <= N; c++) { const x = ws.getCell(r, c); if (x.master === x && x.value) fitLine(ws, x); } // 客戶、日期字級也依內容調整
     r++;
   }
   r++;
@@ -1513,7 +1514,9 @@ async function buildXlsx() {
       cell.border = box;
       cell.alignment = { vertical: 'middle', horizontal: ['index', 'qty', 'unit'].includes(c.role) ? 'center' : ['price', 'amount'].includes(c.role) ? 'right' : 'left', wrapText: true };
       if (c.role === 'price' || c.role === 'amount') cell.numFmt = money;
-      if (['name', 'spec', 'size', 'material'].includes(c.role) && cell.value) fitLine(ws, cell);
+      // 每一格字級都依內容調整；金額是公式，用數量×單價估顯示的字
+      if (c.role === 'amount' && cQty && cPrice) { if (priceOf(img) != null) fitLine(ws, cell, 1, undefined, shownText(cell, priceOf(img) * qtyOf(img))); }
+      else if (c.role !== 'image' && cell.value != null && cell.value !== '') fitLine(ws, cell);
     });
     const p = prepared[i];
     if (p) ws.addImage(wb.addImage({ buffer: p.buffer, extension: p.extension }), placeAt(ws, cImg, 1, rr, p.w, p.h));
@@ -1522,11 +1525,12 @@ async function buildXlsx() {
   const last = first + items.length - 1;
   r = last + 1;
   if (cAmt > 1) {
-    const A = L(cAmt);
+    const A = L(cAmt), subtotal = items.reduce((s, it) => s + (priceOf(it) ?? 0) * qtyOf(it), 0);
     const totalRow = (label, formula, bold) => {
       mergeRow(r, 1, cAmt - 1);
       Object.assign(ws.getCell(r, 1), { value: label, alignment: { horizontal: 'right' }, font: { bold } });
       Object.assign(ws.getCell(r, cAmt), { value: { formula }, numFmt: money, font: { bold }, alignment: { horizontal: 'right' } });
+      if (subtotal) fitLine(ws, ws.getCell(r, cAmt), 1, undefined, shownText(ws.getCell(r, cAmt), Math.round(subtotal * 1.05)));
       mergeRow(r, cAmt + 1, N);
       for (let c = 1; c <= N; c++) ws.getCell(r, c).border = box;
       return r++;
@@ -1583,8 +1587,15 @@ function fontFor(box, text, base, hFrac = 1) {
 }
 // 填好的格子套上字級、不換行；Excel 的「縮小字型以適合欄寬」當保險（估得不準時 Excel 自己再縮）
 // 換一個新的格式物件，範本裡格式相同的格子共用同一個，直接改會改到別格
-function fitLine(ws, cell, hFrac = 1, valign) {
-  const f = fontFor(cellBox(ws, cell.row, cell.col), cell.value, cell.font?.size || 11, hFrac);
+// text：公式格（金額、合計）Excel 算出來才有值，傳預估要顯示的字；數字照格子的數字格式估（千分位、NT$）
+function shownText(cell, v) {
+  if (v instanceof Date) return todayStr('/');
+  if (typeof v !== 'number') return String(v ?? '');
+  const fmt = String(cell.numFmt || '');
+  return (/\$|NT/.test(fmt) ? 'NT$ ' : '') + (/,/.test(fmt) ? Math.round(v).toLocaleString('en-US') : String(v));
+}
+function fitLine(ws, cell, hFrac = 1, valign, text) {
+  const f = fontFor(cellBox(ws, cell.row, cell.col), text ?? shownText(cell, cell.value), cell.font?.size || 11, hFrac);
   cell.style = { ...cell.style, font: { ...(cell.font || {}), size: f.sz }, alignment: { ...(cell.alignment || {}), wrapText: false, shrinkToFit: true, ...(valign ? { vertical: valign } : {}) } };
   return f;
 }
@@ -1703,10 +1714,12 @@ function pickSheet(wb, map, n) {
     const t = findTableIn(s, map);
     if (!t) return null;
     const ir = itemRows(s, t);
-    return { ws: s, t, ir, cap: ir.open ? Infinity : ir.rows.length };
+    // blank：品項區還沒填過東西（已經寫好別的客戶品項的工作表，是舊估價單，不拿來用）
+    return { ws: s, t, ir, cap: ir.open ? Infinity : ir.rows.length, blank: ir.open || ir.rows.length === ir.all.length };
   }).filter(Boolean);
-  const fit = list.filter(s => s.cap >= n).sort((a, b) => a.cap - b.cap)[0];
-  return { pick: fit || [...list].sort((a, b) => b.cap - a.cap)[0], list };
+  const pool = list.some(s => s.blank && s.cap > 0) ? list.filter(s => s.blank) : list;
+  const fit = pool.filter(s => s.cap >= n).sort((a, b) => a.cap - b.cap)[0];
+  return { pick: fit || [...pool].sort((a, b) => b.cap - a.cap)[0], list };
 }
 
 let fillNote = '';
@@ -1808,13 +1821,13 @@ async function fillBlocks(wb, ws, t, rows, items, used, doneBefore) {
   for (let i = 0; i < items.length; i++) {
     showMsg(`處理圖片 ${doneBefore + i + 1} / ${total}…`);
     const blk = rows[i], r = blk.top, img = items[i];
-    // 只填空白的格子
-    const put = (c, v) => { if (!c) return null; const cell = ws.getCell(r, c).master; if (!isBlank(cell)) return null; cell.value = v; return cell; };
+    // 只填空白的格子；每一格字級都依內容調整（使用者 2026-10-30 要求所有欄位都要）
+    const put = (c, v, text) => { if (!c) return null; const cell = ws.getCell(r, c).master; if (!isBlank(cell)) return null; cell.value = v; fitLine(ws, cell, 1, undefined, text); return cell; };
     put(cIdx, used + i + 1);
     // 尺寸、材質不加「尺寸：」「材質：」；每格一行、不換行，字級依內容調整
     const sizeV = (img.size || '').trim(), matV = (img.spec || '').trim();
-    if (cSize && sizeV) { const c = put(cSize, sizeV); if (c) fitLine(ws, c); }
-    if (cMat && matV) { const c = put(cMat, matV); if (c) fitLine(ws, c); }
+    if (cSize && sizeV) put(cSize, sizeV);
+    if (cMat && matV) put(cMat, matV);
     const vals = [!cSize && sizeV, !cMat && matV].filter(Boolean), spec = vals.join('　'); // 沒有專屬欄的
     const under = ic.underName || ic.col === cName;
     const nb = ws._merges[ws.getCell(r, ic.col).master.address]?.bottom ?? r; // 品名格的最後一列
@@ -1839,7 +1852,10 @@ async function fillBlocks(wb, ws, t, rows, items, used, doneBefore) {
     if (spec && !nameHasSpec && (cSpec || cNote)) putLines(ws, cSpec || cNote, r, blk.bottom, vals);
     put(cQty, qtyOf(img));
     if (cPrice && priceOf(img) != null) put(cPrice, priceOf(img));
-    if (cQty && cPrice) put(cAmt, { formula: `IF(${L(cPrice)}${r}="","",${L(cQty)}${r}*${L(cPrice)}${r})` });
+    if (cQty && cPrice) {
+      const ac = cAmt && ws.getCell(r, cAmt).master, amt = priceOf(img) != null ? priceOf(img) * qtyOf(img) : null;
+      put(cAmt, { formula: `IF(${L(cPrice)}${r}="","",${L(cQty)}${r}*${L(cPrice)}${r})` }, ac ? shownText(ac, amt ?? '') : '');
+    }
     // 圖片的格子：品名和圖片同一欄時，放在品名下面那塊合併格；整組只有一格就貼底，留上面給品名
     let box, bottom = false;
     if (under) {
@@ -1868,16 +1884,26 @@ async function fillBlocks(wb, ws, t, rows, items, used, doneBefore) {
     const kind = CLIENT_ONLY.test(f) ? 'client' : DATE_ONLY.test(f) ? 'date' : null;
     if (!kind) {
       // 同一格裡就有日期：「日期：115年  月  日」「中華民國　年　月　日」照原本的寫法填今天
-      if (DATE_WORD.test(text) || /中華民國.*年.*月.*日/.test(text)) { const neu = fillDateText(text); if (neu !== text) cell.value = neu; }
+      if (DATE_WORD.test(text) || /中華民國.*年.*月.*日/.test(text)) { const neu = fillDateText(text); if (neu !== text) { cell.value = neu; fitLine(ws, cell); } }
       continue;
     }
     if (kind === 'client' && !client) continue;
     const next = ws.getCell(r, col + mergeSpan(ws, cell)).master;
-    if (kind === 'client') { if (isBlank(next)) next.value = client; continue; }
+    if (kind === 'client') { if (isBlank(next)) { next.value = client; fitLine(ws, next); } continue; }
     // 「日期」旁邊那格：空白填今天；是日期值就換今天（格式不動）；是文字就照它的寫法換
     if (isBlank(next)) next.value = todayStr('/');
     else if (next.value instanceof Date) { const d = new Date(); next.value = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); }
-    else if (!isFormula(next)) { const neu = todayIn(cellText(next)); if (neu != null) next.value = neu; }
+    else if (!isFormula(next)) { const neu = todayIn(cellText(next)); if (neu != null) next.value = neu; else continue; }
+    else continue;
+    fitLine(ws, next);
+  }
+  // 合計、稅金、總計這幾格（公式）：用這次的總金額估顯示的字，字級跟著調
+  if (cAmt && t.tot) {
+    const subtotal = quoteItems().reduce((s, it) => s + (priceOf(it) ?? 0) * qtyOf(it), 0);
+    if (subtotal) for (let r = t.tot; r <= (t.totEnd || t.tot); r++) {
+      const c = ws.getCell(r, cAmt).master;
+      if (isFormula(c)) fitLine(ws, c, 1, undefined, shownText(c, Math.round(subtotal * 1.05)));
+    }
   }
 }
 
