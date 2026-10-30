@@ -401,7 +401,7 @@ function fillInfo(t) {
   return fillDateText(String(t).replace(CLIENT_RE, (m, a, b) => a + b + c));
 }
 
-const DEFAULT_COLS = ['項次', '圖片', '品名', '尺寸', '材質', '數量', '單位', '單價', '金額', '備註'];
+const DEFAULT_COLS = ['項次', '圖片', '品名', '規格', '數量', '單位', '單價', '金額', '備註'];
 function ensureCols(cols) {
   if (!cols.some(c => c.role === 'name')) cols.splice(Math.min(1, cols.length), 0, { name: '品名', role: 'name' });
   if (!cols.some(c => c.role === 'image')) cols.splice(cols.findIndex(c => c.role === 'name'), 0, { name: '圖片', role: 'image' });
@@ -792,7 +792,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-30.1';
+const APP_VERSION = '2026-10-30.2';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -870,7 +870,7 @@ function refresh() {
   $('sum').innerHTML += '<span class="pill" id="sumTotal" hidden></span>';
   const ppt = $('qFmt').value === 'pptx'; // PPT 簡報沒有數量、單價
   $('thA').hidden = $('thB').hidden = ppt;
-  // 尺寸、材質各一欄，Excel 也各放一欄（使用者 2026-10-30 要求：一個欄位對應一個欄位）
+  // 尺寸、材質在網頁上各一個輸入欄，清楚分開（使用者 2026-10-30）；Excel 版面照舊，不多加欄
   // 手機上每一項排成小卡片，欄位名稱用 data-h 顯示在格子上方
   $('rows').innerHTML = items.map((i, n) => `<tr><td class="r"><button type="button" class="drag" data-n="${n}" aria-label="拖曳或按上下鍵調整第 ${n + 1} 項的順序" title="按住拖曳調整順序">⠿</button>${n + 1}</td><td class="c-nm"><input type="text" class="nm" size="6" id="nm${n}" aria-label="第 ${n + 1} 項品名"><div class="ai-wait" hidden>AI 看圖中…</div><select class="rm" id="rm${n}" aria-label="第 ${n + 1} 項的空間" title="清單依空間排序；PPT 同空間的放同一頁">${ROOMS.map(r => `<option>${r}</option>`).join('')}</select></td>`
     + `<td class="c-z" data-h="尺寸"><input type="text" class="sz" size="5" id="z${n}" placeholder="例 200×90×85" aria-label="第 ${n + 1} 項尺寸"></td><td class="c-mt" data-h="材質"><input type="text" class="sz" size="5" id="mt${n}" placeholder="例 灰色布面" aria-label="第 ${n + 1} 項材質"></td>`
