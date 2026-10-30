@@ -792,7 +792,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-30.2';
+const APP_VERSION = '2026-10-30.3';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -1096,6 +1096,23 @@ async function normalizeOoxml(buf, ext) {
   return z.generateAsync({ type: 'arraybuffer' });
 }
 
+// ExcelJS 把工作表設定 <sheetPr> 裡的「每頁縮放」（pageSetUpPr）寫在「大綱」（outlinePr）前面，
+// 順序不對 Excel 打開就要修復（使用者 2026-10-30 回報：範本兩個都有時才會發生）。存完照規定的順序排回去
+async function fixSheetPr(buf) {
+  const JSZip = await loadLib('jszip'), z = await JSZip.loadAsync(buf), ORDER = ['tabColor', 'outlinePr', 'pageSetUpPr'];
+  let changed = false;
+  for (const k of Object.keys(z.files).filter(k => /^xl\/worksheets\/sheet\d+\.xml$/.test(k))) {
+    const x = await z.file(k).async('string');
+    const y = x.replace(/<sheetPr([^>]*)>([\s\S]*?)<\/sheetPr>/, (m, attrs, inner) => {
+      const kids = inner.match(/<(tabColor|outlinePr|pageSetUpPr)\b[^>]*\/>/g) || [];
+      if (kids.join('') !== inner) return m; // 有其他寫法就不動
+      kids.sort((a, b) => ORDER.indexOf(a.match(/<(\w+)/)[1]) - ORDER.indexOf(b.match(/<(\w+)/)[1]));
+      return `<sheetPr${attrs}>${kids.join('')}</sheetPr>`;
+    });
+    if (y !== x) { z.file(k, y); changed = true; }
+  }
+  return changed ? z.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' }) : buf;
+}
 // ExcelJS 存檔會把範本裡的文字框、圖形、線條弄丟：存完再從範本補回去（範本插過列的話位置跟著往下移）
 // 圖表、SmartArt 沒辦法補，回傳數量讓畫面提醒
 async function keepShapes(tplBuf, outBuf, shifts) {
@@ -1544,7 +1561,7 @@ async function buildXlsx() {
   }
   ws.pageSetup.printArea = `A1:${L(N)}${r - 1}`;
   ws.pageSetup.printTitlesRow = `${hr}:${hr}`;
-  return new Blob([await wb.xlsx.writeBuffer()], { type: XLSX_TYPE });
+  return new Blob([await fixSheetPr(await wb.xlsx.writeBuffer())], { type: XLSX_TYPE });
 }
 
 const isFormula = cell => cell.type === ExcelJS.ValueType.Formula;
@@ -1732,6 +1749,8 @@ async function fillXlsxTemplate() {
     }
     // 範本沒設定每頁重複標題時，讓欄位標題列每頁都印出來
     if (!ws.pageSetup.printTitlesRow) ws.pageSetup.printTitlesRow = `${t0.h}:${t0.h}`;
+    // 範本設成「整張縮成一頁」時分頁會被忽略、全部擠在一張紙：改成寬度一頁、高度照分頁（0＝自動）
+    if (ws.pageSetup.fitToPage && ws.pageSetup.fitToHeight !== 0) ws.pageSetup.fitToHeight = 0;
     fillNote += `品項比範本多，已接著新增 ${pages - 1} 頁；總金額和下面的匯款、約定事項只放在最後一頁。`;
   } else if (all.length > per && !ir0.open) {
     // 範本裡沒有空的品項位置，只好照最後一組往下新增
@@ -1764,6 +1783,7 @@ async function fillXlsxTemplate() {
     out = ks.buf;
     if (ks.lost) fillNote += `範本裡有 ${ks.lost} 個圖表或特殊物件沒辦法保留，請打開檔案確認。`;
   } catch (e) { errLog.push('keepShapes: ' + (e?.message || e)); }
+  try { out = await fixSheetPr(out); } catch (e) { errLog.push('fixSheetPr: ' + (e?.message || e)); }
   return new Blob([out], { type: XLSX_TYPE });
 }
 
