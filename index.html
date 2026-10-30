@@ -107,6 +107,18 @@ body.reordering,body.reordering *{cursor:grabbing!important;user-select:none}
   .thumbs img,.ph{max-width:46px}
 }
 select.rm{font-size:12px;padding:1px 4px;margin:2px 0 0 6px;max-width:none;color:var(--muted)}
+input.sz{width:7.5em;max-width:none;font:inherit;font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--fg)}
+/* 手機：每一項排成小卡片（品名／尺寸 材質／數量 單價，圖片在右邊），欄位名稱寫在格子上方 */
+@media (max-width:520px){
+  .tbl thead{display:none}
+  #rows tr{display:grid;grid-template-columns:30px minmax(0,1fr) minmax(0,1fr) 60px;grid-template-areas:"r nm nm img" "r z mt img" "r q p img";gap:4px 8px;padding:10px 0;border-bottom:1px solid var(--line);align-items:start}
+  #rows td{border:0;padding:0;min-width:0}
+  #rows td.r{grid-area:r} #rows td.c-nm{grid-area:nm} #rows td.c-z{grid-area:z} #rows td.c-mt{grid-area:mt}
+  #rows td.c-q{grid-area:q} #rows td.c-p{grid-area:p} #rows td.c-img{grid-area:img}
+  #rows td[data-h]::before{content:attr(data-h);display:block;font-size:11px;color:var(--muted)}
+  #rows input.sz,#rows input.num,#rows input.num.price{width:100%;font-size:16px}
+  #rows .amt{text-align:left}
+}
 input.num{width:4.2em;max-width:none;font:inherit;font-size:14px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--fg);text-align:right;font-variant-numeric:tabular-nums}
 input.num.price{width:6.5em}
 td.amt{font-size:12px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -187,7 +199,7 @@ button.go.small{width:auto;font-size:14px;padding:8px 16px;margin-top:0}
       <div class="step-h" style="margin-bottom:8px">品項<span class="tag" id="sample">範例</span></div>
       <div class="sum" id="sum"></div>
       <div class="tbl"><table>
-        <thead><tr><th>項次</th><th>品名</th><th id="thA">數量</th><th id="thB">單價</th><th>圖片</th></tr></thead>
+        <thead><tr><th>項次</th><th>品名</th><th>尺寸</th><th>材質</th><th id="thA">數量</th><th id="thB">單價</th><th>圖片</th></tr></thead>
         <tbody id="rows"></tbody>
       </table></div>
     </section>
@@ -317,12 +329,15 @@ const ROLE_RE = [
   ['unit', /^(單位|unit)$/i],
   ['price', /(單價|price)/i],
   ['amount', /(金額|複價|總價|小計|amount)/i],
-  ['spec', /^(規格|尺寸|材質|規格尺寸|尺寸規格|規格說明|材質說明|spec|size)$/i],
+  // 尺寸、材質各自一欄時分開放；只有一個「規格」欄才合在一起
+  ['size', /^((規格)?尺寸(規格)?([(（].{0,6}[)）])?|size|dimensions?)$/i],
+  ['material', /^(材質|材料|材質說明|面料|material)$/i],
+  ['spec', /^(規格|規格說明|spec)$/i],
   ['name', /(品名|名稱|品項|產品名|商品|description)/i],
   // 「項目」「內容」這類詞可能是品名也可能是編號，沒有更明確的品名欄才當品名
   ['nameWeak', /(項目|工程|內容|說明|產品)/],
 ];
-const ROLE_LABEL = { index: '編號', name: '品名', spec: '規格', image: '圖片', qty: '數量', unit: '單位', price: '單價', amount: '金額' };
+const ROLE_LABEL = { index: '編號', name: '品名', spec: '規格', size: '尺寸', material: '材質', image: '圖片', qty: '數量', unit: '單位', price: '單價', amount: '金額' };
 function roleOf(t) {
   t = flat(t);
   if (!t || t.length > 12) return 'other';
@@ -386,7 +401,7 @@ function fillInfo(t) {
   return fillDateText(String(t).replace(CLIENT_RE, (m, a, b) => a + b + c));
 }
 
-const DEFAULT_COLS = ['項次', '圖片', '品名', '規格', '數量', '單位', '單價', '金額', '備註'];
+const DEFAULT_COLS = ['項次', '圖片', '品名', '尺寸', '材質', '數量', '單位', '單價', '金額', '備註'];
 function ensureCols(cols) {
   if (!cols.some(c => c.role === 'name')) cols.splice(Math.min(1, cols.length), 0, { name: '品名', role: 'name' });
   if (!cols.some(c => c.role === 'image')) cols.splice(cols.findIndex(c => c.role === 'name'), 0, { name: '圖片', role: 'image' });
@@ -708,8 +723,9 @@ const priceOf = img => parseNum(img.price);
 // PPT 品名下面條列（照使用者 2026-10-27 改過的李公館簡報）：一行「尺寸：…」、一行「材質：…」，沒填的不寫
 const detailLines = img => [(img.size || '').trim() && '尺寸：' + img.size.trim(), (img.spec || '').trim() && '材質：' + img.spec.trim()].filter(Boolean);
 const detailOf = img => detailLines(img).join('\n');
-// Excel 的規格格：尺寸、材質各一行，不加標籤（照使用者改過的李公館估價單）
-const specLines = img => [img.size, img.spec].map(x => (x || '').trim()).filter(Boolean).join('\n');
+// Excel：尺寸、材質不加標籤（照使用者改過的李公館估價單）；儲存格裡不換行（使用者 2026-10-30 要求）
+const specVals = img => [img.size, img.spec].map(x => (x || '').trim()).filter(Boolean);
+const specOneLine = img => specVals(img).join('　'); // 只有一個「規格」格時放同一行
 const money = v => v == null ? '' : 'NT$ ' + Math.round(v).toLocaleString('en-US');
 function updateTotals() {
   const items = quoteItems();
@@ -776,7 +792,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-27.16';
+const APP_VERSION = '2026-10-30.1';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -844,7 +860,7 @@ function refresh() {
   if (!images.length) {
     $('sum').innerHTML = '<span class="pill">3 個品項</span>';
     $('rows').innerHTML = [[1, '北歐布沙發', '01_北歐布沙發.jpg'], [2, '實木餐桌', '02_實木餐桌.jpg'], [3, '吊燈', '03_吊燈.png']]
-      .map(([r, t, f]) => `<tr><td class="r">${r}</td><td>${t}</td><td class="r">1</td><td class="muted">未填</td><td><div class="thumbs">${ph(f)}</div></td></tr>`).join('');
+      .map(([r, t, f]) => `<tr><td class="r">${r}</td><td class="c-nm">${t}</td><td class="c-z muted" data-h="尺寸">—</td><td class="c-mt muted" data-h="材質">—</td>${$('qFmt').value === 'pptx' ? '' : '<td class="c-q" data-h="數量">1</td><td class="c-p muted" data-h="單價">未填</td>'}<td class="c-img"><div class="thumbs">${ph(f)}</div></td></tr>`).join('');
     return;
   }
   const items = quoteItems();
@@ -852,22 +868,23 @@ function refresh() {
   $('sum').innerHTML = `<span class="pill">${items.length} 個品項</span>`
     + (items.length > slots ? `<span class="pill">範本有 ${slots} 個位置，超過的會自動新增一頁</span>` : '');
   $('sum').innerHTML += '<span class="pill" id="sumTotal" hidden></span>';
-  const ppt = $('qFmt').value === 'pptx'; // PPT 簡報：數量、單價換成尺寸、材質
-  $('thA').textContent = ppt ? '尺寸' : '數量'; $('thB').textContent = ppt ? '材質' : '單價';
-  $('rows').innerHTML = items.map((i, n) => `<tr><td class="r"><button type="button" class="drag" data-n="${n}" aria-label="拖曳或按上下鍵調整第 ${n + 1} 項的順序" title="按住拖曳調整順序">⠿</button>${n + 1}</td><td><input type="text" class="nm" size="6" id="nm${n}" aria-label="第 ${n + 1} 項品名"><div class="ai-wait" hidden>AI 看圖中…</div>${ppt ? '' : `<input type="text" class="nm spec" size="6" id="sp${n}" placeholder="規格" aria-label="第 ${n + 1} 項規格">`}<select class="rm" id="rm${n}" aria-label="第 ${n + 1} 項的空間" title="清單依空間排序；PPT 同空間的放同一頁">${ROOMS.map(r => `<option>${r}</option>`).join('')}</select></td>`
-    + (ppt
-      ? `<td><input type="text" class="nm sz" size="5" id="z${n}" placeholder="例 200×90×85" aria-label="第 ${n + 1} 項尺寸"></td><td><input type="text" class="nm" size="5" id="mt${n}" placeholder="例 灰色布面" aria-label="第 ${n + 1} 項材質"></td>`
-      : `<td><input class="num" size="2" id="q${n}" inputmode="decimal" aria-label="第 ${n + 1} 項數量"></td>`
-        + `<td><input class="num price" size="4" id="p${n}" inputmode="decimal" placeholder="未填" aria-label="第 ${n + 1} 項單價"><div class="amt" id="a${n}"></div></td>`)
-    + `<td><div class="thumbs"><button type="button" class="del" data-n="${n}" aria-label="刪除第 ${n + 1} 項" title="刪除這張">✕</button><figure><img src="${thumbOf(i)}" data-k="${esc(i.url)}" alt=""><figcaption title="${esc(i.name)}">${esc(i.name)}</figcaption></figure></div></td></tr>`).join('');
+  const ppt = $('qFmt').value === 'pptx'; // PPT 簡報沒有數量、單價
+  $('thA').hidden = $('thB').hidden = ppt;
+  // 尺寸、材質各一欄，Excel 也各放一欄（使用者 2026-10-30 要求：一個欄位對應一個欄位）
+  // 手機上每一項排成小卡片，欄位名稱用 data-h 顯示在格子上方
+  $('rows').innerHTML = items.map((i, n) => `<tr><td class="r"><button type="button" class="drag" data-n="${n}" aria-label="拖曳或按上下鍵調整第 ${n + 1} 項的順序" title="按住拖曳調整順序">⠿</button>${n + 1}</td><td class="c-nm"><input type="text" class="nm" size="6" id="nm${n}" aria-label="第 ${n + 1} 項品名"><div class="ai-wait" hidden>AI 看圖中…</div><select class="rm" id="rm${n}" aria-label="第 ${n + 1} 項的空間" title="清單依空間排序；PPT 同空間的放同一頁">${ROOMS.map(r => `<option>${r}</option>`).join('')}</select></td>`
+    + `<td class="c-z" data-h="尺寸"><input type="text" class="sz" size="5" id="z${n}" placeholder="例 200×90×85" aria-label="第 ${n + 1} 項尺寸"></td><td class="c-mt" data-h="材質"><input type="text" class="sz" size="5" id="mt${n}" placeholder="例 灰色布面" aria-label="第 ${n + 1} 項材質"></td>`
+    + (ppt ? ''
+      : `<td class="c-q" data-h="數量"><input class="num" size="2" id="q${n}" inputmode="decimal" aria-label="第 ${n + 1} 項數量"></td>`
+        + `<td class="c-p" data-h="單價"><input class="num price" size="4" id="p${n}" inputmode="decimal" placeholder="未填" aria-label="第 ${n + 1} 項單價"><div class="amt" id="a${n}"></div></td>`)
+    + `<td class="c-img"><div class="thumbs"><button type="button" class="del" data-n="${n}" aria-label="刪除第 ${n + 1} 項" title="刪除這張">✕</button><figure><img src="${thumbOf(i)}" data-k="${esc(i.url)}" alt=""><figcaption title="${esc(i.name)}">${esc(i.name)}</figcaption></figure></div></td></tr>`).join('');
   items.forEach((img, n) => {
     const box = $('nm' + n);
     box.addEventListener('input', () => { img.label = box.value; img.edited = true; updateNames(); });
     box.addEventListener('change', () => { applyMem(); if (!resort()) updateNames(); }); // 改好品名後，產品庫有同名的就帶入單價；空間可能跟著變，重新排
     $('rm' + n).addEventListener('change', e => { img.room = e.target.value; img.roomEdited = true; img.placed = false; resort(); }); // 換空間就移到那個空間的位置
     const on = (id, fn) => $(id + n)?.addEventListener('input', e => fn(e.target.value));
-    on('sp', v => { img.spec = v; img.specEdited = true; });
-    on('mt', v => { img.spec = v; img.specEdited = true; }); // 材質＝規格
+    on('mt', v => { img.spec = v; img.specEdited = true; }); // 材質（AI 看圖寫的也放這裡）
     on('z', v => { img.size = v; img.sizeEdited = true; });
     on('q', v => { img.qty = v; updateTotals(); });
     on('p', v => { img.price = v; img.priceEdited = true; img.priceFromLib = false; updateTotals(); });
@@ -944,7 +961,7 @@ function updateNames() {
     if (document.activeElement !== box) box.value = img.label;
     box.nextElementSibling.hidden = !img.ai;
     const put = (id, v) => { const el = $(id + n); if (el && document.activeElement !== el) el.value = v; };
-    put('sp', img.spec || ''); put('mt', img.spec || ''); put('z', img.size || '');
+    put('mt', img.spec || ''); put('z', img.size || '');
     const rm = $('rm' + n);
     if (document.activeElement !== rm) rm.value = roomOf(img);
     put('q', img.qty ?? 1); put('p', img.price ?? '');
@@ -1199,7 +1216,7 @@ function colValues(ws, col, rows) {
   return rows.map(k => { const c = ws.getCell(k, col); return c.isMerged && c.master.row !== k ? '' : cellText(c.master).trim(); }).filter(Boolean);
 }
 const isSeq = v => v.length >= 2 && v.every(x => /^\d+$/.test(x)) && v.every((x, i) => i === 0 || +x === +v[i - 1] + 1);
-const AI_ROLES = ['index', 'name', 'name_image', 'spec', 'image', 'qty', 'unit', 'price', 'amount'];
+const AI_ROLES = ['index', 'name', 'name_image', 'spec', 'size', 'material', 'image', 'qty', 'unit', 'price', 'amount'];
 
 // map：AI 判斷的欄位用途，例如 {A:'index', B:'name', C:'image'}，有的話以它為準
 function findTable(wb, map) {
@@ -1295,7 +1312,7 @@ async function aiMapColumns() {
     const map = await sampler.json(`這是一份 Excel 估價單範本的表格（標題列在第 ${t.h} 列），一個品項可能佔一列，也可能佔好幾列。請判斷每一欄是用來填什麼。
 ${lines.join('\n')}
 
-用途只能是：index（項次編號）、name（品項名稱）、name_image（同一欄上面寫品名、下面放圖片，例如標題「名稱及圖片」）、spec（規格、尺寸、材質）、image（放產品圖片）、qty（數量）、unit（單位）、price（單價）、amount（金額＝數量×單價）、other（其他，例如備註）。
+用途只能是：index（項次編號）、name（品項名稱）、name_image（同一欄上面寫品名、下面放圖片，例如標題「名稱及圖片」）、size（只寫尺寸的欄）、material（只寫材質的欄）、spec（規格，尺寸材質寫在同一欄）、image（放產品圖片）、qty（數量）、unit（單位）、price（單價）、amount（金額＝數量×單價）、other（其他，例如備註）。
 判斷原則：範本裡已經填好 1、2、3 這種連號的欄是 index，不是品名。標題寫「項目」但內容是編號，就是 index。標題同時有名稱和圖片，或品名格下面接著一塊合併的大格子，就是 name_image。備註欄不放圖片。標題空白但很寬的欄，通常是放圖片或品名。每種用途最多一欄，一定要有 name 或 name_image。
 只回 JSON 物件，鍵是欄號，值是用途，例如 {"A":"index","B":"name_image","C":"qty","D":"price","E":"amount","F":"other"}。`, { modelTier: 'quick' });
     if (tpl !== mine || !map || typeof map !== 'object') return;
@@ -1440,7 +1457,7 @@ async function buildXlsx() {
   const at = role => cols.findIndex(c => c.role === role) + 1;
   const cImg = at('image'), cQty = at('qty'), cPrice = at('price'), cAmt = at('amount');
   const L = colLetter;
-  const COL_W = { index: 6, name: 24, spec: 18, qty: 7, unit: 6, price: 11, amount: 13, other: 14 };
+  const COL_W = { index: 6, name: 24, spec: 22, size: 18, material: 16, qty: 7, unit: 6, price: 11, amount: 13, other: 14 };
   cols.forEach((c, i) => ws.getColumn(i + 1).width = c.role === 'image' ? pxToChars(imgW) : COL_W[c.role]);
   const mergeRow = (r, a, b) => { if (b > a) ws.mergeCells(r, a, r, b); };
   const totalChars = cols.reduce((a, c, i) => a + ws.getColumn(i + 1).width, 0);
@@ -1478,13 +1495,15 @@ async function buildXlsx() {
       const cell = row.getCell(j + 1);
       cell.value = c.role === 'index' ? i + 1 : c.role === 'name' ? labelOf(img) : c.role === 'qty' ? qtyOf(img)
         : c.role === 'price' ? priceOf(img)
-        : c.role === 'spec' ? specLines(img) || null
+        : c.role === 'size' ? (img.size || '').trim() || null
+        : c.role === 'material' ? (img.spec || '').trim() || null
+        : c.role === 'spec' ? specOneLine(img) || null
         : c.role === 'unit' && !tpl ? '件'
         : c.role === 'amount' && cQty && cPrice ? { formula: `IF(${L(cPrice)}${rr}="","",${L(cQty)}${rr}*${L(cPrice)}${rr})` } : null;
       cell.border = box;
       cell.alignment = { vertical: 'middle', horizontal: ['index', 'qty', 'unit'].includes(c.role) ? 'center' : ['price', 'amount'].includes(c.role) ? 'right' : 'left', wrapText: true };
       if (c.role === 'price' || c.role === 'amount') cell.numFmt = money;
-      if ((c.role === 'name' || c.role === 'spec') && cell.value) fitFont(ws, cell);
+      if (['name', 'spec', 'size', 'material'].includes(c.role) && cell.value) fitLine(ws, cell);
     });
     const p = prepared[i];
     if (p) ws.addImage(wb.addImage({ buffer: p.buffer, extension: p.extension }), placeAt(ws, cImg, 1, rr, p.w, p.h));
@@ -1538,24 +1557,25 @@ function cellBox(ws, r, c) {
   const top = m ? m.top : r, left = m ? m.left : c, bottom = m ? m.bottom : r, right = m ? m.right : c;
   return { top, left, widths: range(left, right).map(k => colPx(ws, k)), heights: range(top, bottom).map(k => rowPx(ws, k)) };
 }
-// 文字多就把字縮小到剛好塞進格子（含合併範圍）；最大是格子原本的字級，最小 7。hFrac：圖片也放在同一格時文字只能用上面一部分
-// 換行照「全形字一個字寬、半形約半個字寬」估算
-// 回傳字級、文字佔的高度（pt）、塞不塞得下
+// 字級依內容多寡調整：一格一行、不換行（使用者 2026-10-30 要求儲存格裡不要換行），字縮到整段放得進格子（含合併範圍）
+// 最大是格子原本的字級（不放大）、最小 6；hFrac：圖片也放在同一格時文字只能用一部分
+// 字寬照「全形字一個字寬、半形約半個字寬」估算；回傳字級、塞不塞得下
 function fontFor(box, text, base, hFrac = 1) {
   // 寬度估算照使用者改過的李公館估價單校正：13.875 寬的欄，「寬285*深90*高100」用 8 號、「寬180*深209*高110」用 7 號
   // （實際顯示比估算寬，也留一點左右空白，所以可用寬度只算 86%）
   const w = sum(box.widths) * 0.75 * 0.86, h = sum(box.heights) * 0.75 * hFrac - 5;
-  const lines = String(text ?? '').split('\n');
-  const width = l => [...l].reduce((a, ch) => a + (/[\x00-\xff]/.test(ch) ? 0.5 : 1), 0);
-  const need = s => w <= 0 ? Infinity : lines.reduce((n, l) => n + Math.max(1, Math.ceil(width(l) * s / w)), 0) * s * 1.3;
+  const line = String(text ?? '').replace(/\n/g, '　');
+  const width = [...line].reduce((a, ch) => a + (/[\x00-\xff]/.test(ch) ? 0.5 : 1), 0);
+  const fit = s => w > 0 && width * s <= w && s * 1.3 <= h;
   let sz = Math.floor(base); // 一次縮 1 號，和一般人調字級一樣是整數
-  while (sz > 6 && need(sz) > h) sz -= 1;
-  return { sz, used: need(sz), fits: need(sz) <= h };
+  while (sz > 6 && !fit(sz)) sz -= 1;
+  return { sz, used: sz * 1.3, fits: fit(sz) };
 }
-function fitFont(ws, cell, hFrac = 1, valign) {
+// 填好的格子套上字級、不換行；Excel 的「縮小字型以適合欄寬」當保險（估得不準時 Excel 自己再縮）
+// 換一個新的格式物件，範本裡格式相同的格子共用同一個，直接改會改到別格
+function fitLine(ws, cell, hFrac = 1, valign) {
   const f = fontFor(cellBox(ws, cell.row, cell.col), cell.value, cell.font?.size || 11, hFrac);
-  // 換一個新的格式物件，範本裡格式相同的格子共用同一個，直接改會改到別格
-  cell.style = { ...cell.style, font: { ...(cell.font || {}), size: f.sz }, alignment: { ...(cell.alignment || {}), wrapText: true, ...(valign ? { vertical: valign } : {}) } };
+  cell.style = { ...cell.style, font: { ...(cell.font || {}), size: f.sz }, alignment: { ...(cell.alignment || {}), wrapText: false, shrinkToFit: true, ...(valign ? { vertical: valign } : {}) } };
   return f;
 }
 // 圖片放進這一格（置中，bottom 時貼底），左上和右下都綁在格子裡
@@ -1748,16 +1768,16 @@ async function fillXlsxTemplate() {
 }
 
 // 尺寸、材質寫進一組品項的某一欄，看範本那一欄的格子怎麼切：
-// 一組裡有好幾個獨立的列 → 一列一項，整組用同一個放得下的字級、垂直置中；整組是一個合併格 → 同一格換行
+// 一組裡有好幾個獨立的列 → 一列一項，整組用同一個放得下的字級、垂直置中；整組只有一格 → 同一行用全形空白隔開（不換行）
 function putLines(ws, c, top, bottom, vals) {
   const slots = [];
   for (let k = top; k <= bottom; k++) { const m = ws.getCell(k, c).master; if (!slots.includes(m)) slots.push(m); }
   if (!slots.length || !isBlank(slots[0])) return;
-  if (slots.length < 2) { slots[0].value = vals.join('\n'); fitFont(ws, slots[0]); return; }
+  if (slots.length < 2) { slots[0].value = vals.join('　'); fitLine(ws, slots[0]); return; }
   const base = slots[0].font?.size || 11;
   const sz = Math.min(...vals.map((v, k) => k < slots.length ? fontFor(cellBox(ws, slots[k].row, slots[k].col), v, base).sz : base));
   vals.forEach((v, k) => { if (k < slots.length && isBlank(slots[k])) slots[k].value = k === slots.length - 1 ? vals.slice(k).join('　') : v; });
-  slots.forEach(s => { s.style = { ...s.style, font: { ...(s.font || {}), size: sz }, alignment: { ...(s.alignment || {}), vertical: 'middle' } }; });
+  slots.forEach(s => { s.style = { ...s.style, font: { ...(s.font || {}), size: sz }, alignment: { ...(s.alignment || {}), vertical: 'middle', wrapText: false, shrinkToFit: true } }; });
 }
 
 // 把品項填進一張工作表的品項位置
@@ -1766,9 +1786,10 @@ async function fillBlocks(wb, ws, t, rows, items, used, doneBefore) {
   const ic = pickImageCol(t);
   const at = role => t.cols.find(c => c.role === role)?.col;
   const cIdx = at('index'), cName = at('name'), cQty = at('qty'), cPrice = at('price'), cAmt = at('amount');
-  // 規格放哪裡：「規格／尺寸」欄 → 品名欄本身叫「名稱及規格」就接在品名後面 → 空白的備註欄
+  // 尺寸、材質：範本有「尺寸」「材質」欄就各放各的；沒有專屬欄的放「規格」欄 → 品名欄叫「名稱及規格」就接在品名後面 → 空白的備註欄
+  const cSize = at('size'), cMat = at('material');
   const cSpec = at('spec'), nameC = t.cols.find(c => c.role === 'name');
-  const nameHasSpec = !cSpec && nameC && /規格|說明/.test(flat(nameC.name));
+  const nameHasSpec = !cSpec && !cSize && !cMat && nameC && /規格|說明/.test(flat(nameC.name));
   const cNote = !cSpec && !nameHasSpec ? t.cols.find(c => c.role === 'other' && /備註|說明/.test(flat(c.name)) && c.col !== ic.col)?.col : null;
 
   for (let i = 0; i < items.length; i++) {
@@ -1777,26 +1798,29 @@ async function fillBlocks(wb, ws, t, rows, items, used, doneBefore) {
     // 只填空白的格子
     const put = (c, v) => { if (!c) return null; const cell = ws.getCell(r, c).master; if (!isBlank(cell)) return null; cell.value = v; return cell; };
     put(cIdx, used + i + 1);
-    // Excel 照使用者改過的李公館估價單：尺寸、材質各一行，不加「尺寸：」「材質：」
-    const spec = specLines(img), vals = spec ? spec.split('\n') : [];
+    // 尺寸、材質不加「尺寸：」「材質：」；每格一行、不換行，字級依內容調整
+    const sizeV = (img.size || '').trim(), matV = (img.spec || '').trim();
+    if (cSize && sizeV) { const c = put(cSize, sizeV); if (c) fitLine(ws, c); }
+    if (cMat && matV) { const c = put(cMat, matV); if (c) fitLine(ws, c); }
+    const vals = [!cSize && sizeV, !cMat && matV].filter(Boolean), spec = vals.join('　'); // 沒有專屬欄的
     const under = ic.underName || ic.col === cName;
     const nb = ws._merges[ws.getCell(r, ic.col).master.address]?.bottom ?? r; // 品名格的最後一列
     const imgInName = under && nb >= blk.bottom; // 圖片也放在品名那一格（貼底），文字只能用上面約三成
-    // 「名稱及規格」的品名格只有一列高、塞不下條列時：品名留在品名格，尺寸材質寫在下面圖片格的底部
+    // 「名稱及規格」：品名和尺寸材質同一行放得下（9 號以上）就接在品名後面；放不下就寫在下面圖片格的底部
     let specBelow = false;
     if (nameHasSpec && spec && under && !imgInName && cName) {
-      const nc = ws.getCell(r, cName).master, f = fontFor(cellBox(ws, r, cName), `${labelOf(img)}\n${spec}`, nc.font?.size || 11);
+      const nc = ws.getCell(r, cName).master, f = fontFor(cellBox(ws, r, cName), `${labelOf(img)}　${spec}`, nc.font?.size || 11);
       specBelow = !f.fits || f.sz < 9;
     }
-    const nameCell = put(cName, nameHasSpec && spec && !specBelow ? `${labelOf(img)}\n${spec}` : labelOf(img));
-    if (nameCell) fitFont(ws, nameCell, imgInName ? 0.3 : 1);
+    const nameCell = put(cName, nameHasSpec && spec && !specBelow ? `${labelOf(img)}　${spec}` : labelOf(img));
+    if (nameCell) fitLine(ws, nameCell, imgInName ? 0.3 : 1);
     let textPx = 0;
     if (specBelow) {
       const sc = ws.getCell(nb + 1, ic.col).master;
       if (isBlank(sc)) {
         sc.value = spec;
         sc.style = { ...sc.style, alignment: { ...(sc.alignment || {}), horizontal: 'center' } };
-        textPx = fitFont(ws, sc, 0.4, 'bottom').used / 0.75 + 4;
+        textPx = fitLine(ws, sc, 0.4, 'bottom').used / 0.75 + 4;
       }
     }
     if (spec && !nameHasSpec && (cSpec || cNote)) putLines(ws, cSpec || cNote, r, blk.bottom, vals);
