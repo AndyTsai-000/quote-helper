@@ -835,7 +835,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-31.7';
+const APP_VERSION = '2026-10-31.9';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -1172,6 +1172,10 @@ async function keepDefaultFont(tplBuf, outBuf) {
   const nsNeeded = [...font.matchAll(/<(\w+):/g)].some(x => !new RegExp(`xmlns:${x[1]}=`).test(neu));
   if (nsNeeded) return outBuf; // 用到輸出檔沒宣告的命名空間就不換，免得檔案打不開
   b.file('xl/styles.xml', neu);
+  // ExcelJS 也會在 workbookPr 寫入 defaultThemeVersion，Excel 畫面上的欄就變窄（背景量 Columns.Width 看不出來），要換回範本的
+  const wa = await a.file('xl/workbook.xml')?.async('string'), wb = await b.file('xl/workbook.xml')?.async('string');
+  const PR = /<workbookPr\b[^>]*\/>|<workbookPr\b[^>]*>[\s\S]*?<\/workbookPr>/;
+  if (wa && wb && PR.test(wb)) b.file('xl/workbook.xml', wb.replace(PR, wa.match(PR)?.[0] ?? '<workbookPr/>'));
   return b.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' });
 }
 
@@ -1802,6 +1806,11 @@ async function fillXlsxTemplate() {
   const { pick, list } = pickSheet(wb, map, all.length);
   const t0 = pick.t, ws = t0.ws, ir0 = pick.ir, per = ir0.rows.length;
   fillNote = '';
+  // 範本存檔時可能捲在下面，打開要從第 1 項開始看（欄寬、格式都不動，只改開啟時的位置）
+  ws.views = (ws.views || []).map(v => {
+    const cell = `${colLetter((v.xSplit || 0) + 1)}${(v.ySplit || 0) + 1}`;
+    return { ...v, topLeftCell: v.state === 'frozen' ? cell : 'A1', activeCell: cell };
+  });
   if (list.length > 1) {
     // 打開檔案時直接顯示用到的那張，其他工作表不動
     const idx = wb.worksheets.indexOf(ws);
