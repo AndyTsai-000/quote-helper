@@ -48,6 +48,8 @@ input[type=text]{width:60%}
 .ask .mini2{padding:3px 14px}
 .ask .mini2.yes{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
 .tpl-acts{display:flex;gap:14px}
+.add-more{margin-top:12px;text-align:center}
+.add-more .mini{display:inline-block;font-size:14px;padding:7px 18px}
 button.link{align-self:flex-start;background:none;border:0;padding:0;margin-top:4px;color:var(--warn);font:inherit;font-size:13px;text-decoration:underline;cursor:pointer}
 button.go{width:100%;font:inherit;font-weight:700;font-size:16px;padding:12px;border:0;border-radius:8px;background:var(--accent);color:var(--accent-fg);cursor:pointer;margin-top:14px}
 button.go:disabled{opacity:.45;cursor:not-allowed}
@@ -189,12 +191,13 @@ button.go.small{width:auto;font-size:14px;padding:8px 16px;margin-top:0}
     </div>
 
     <section class="card">
-      <div class="step-h" style="margin-bottom:8px">品項<span class="tag" id="sample">範例</span></div>
+      <div class="step-h" style="margin-bottom:8px">產品資訊<span class="tag" id="sample">範例</span></div>
       <div class="sum" id="sum"></div>
       <div class="tbl"><table>
         <thead><tr><th>項次</th><th>品名</th><th>尺寸</th><th>材質</th><th id="thA">數量</th><th id="thB">單價</th><th>圖片</th></tr></thead>
         <tbody id="rows"></tbody>
       </table></div>
+      <div class="add-more" id="addMore" hidden><label class="mini" for="files" tabindex="0" role="button" id="addMoreBtn">＋ 加入圖檔</label></div>
     </section>
   </div>
   <footer class="foot">估價單小幫手　版本 <span id="ver"></span>　<button type="button" class="link2" id="reportBtn">回報問題</button></footer>
@@ -785,7 +788,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-30.4';
+const APP_VERSION = '2026-10-31.1';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -848,6 +851,7 @@ async function loadBuiltins() {
 // ---------- 預覽 ----------
 function refresh() {
   $('sample').hidden = images.length > 0;
+  $('addMore').hidden = !images.length;
   $('go').disabled = !images.length;
   const ph = name => `<figure><div class="ph"></div><figcaption>${name}</figcaption></figure>`;
   if (!images.length) {
@@ -2250,6 +2254,7 @@ $('go').addEventListener('click', async () => {
 $('folder').addEventListener('change', e => { addImages([...e.target.files]); e.target.value = ''; });
 $('files').addEventListener('change', e => { addImages([...e.target.files]); e.target.value = ''; });
 $('tplFile').addEventListener('change', e => e.target.files[0] && loadTemplate(e.target.files[0]));
+$('addMoreBtn').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('files').click(); } });
 $('qFmt').addEventListener('change', () => { try { localStorage.setItem('xlsimg-fmt', $('qFmt').value); } catch {} renderOptions(); });
 $('aiOn').addEventListener('change', () => {
   try { localStorage.setItem('xlsimg-ai', $('aiOn').checked ? '1' : '0'); } catch {}
