@@ -184,7 +184,7 @@ button.go.small{width:auto;font-size:14px;padding:8px 16px;margin-top:0}
           <option value="100" selected>中（100 像素高）</option>
           <option value="160">大（160 像素高）</option>
         </select></div>
-        <label class="check"><input type="checkbox" id="libSave" checked> 記住這次的品名和單價（下次放同一張照片自動帶入）</label>
+        <label class="check"><input type="checkbox" id="libSave" checked> 自動記住改過的品名、尺寸、材質和單價（下次放同一張照片直接帶入）</label>
         <button class="go" id="go" disabled>下載 Excel 估價單</button>
         <div class="msg" id="msg"></div>
       </section>
@@ -738,6 +738,12 @@ let memCache = new Map();  // 指紋 → { name, price, room, spec }
 let memByName = new Map(); // 品名 → 最近一次的單價（不同照片但同名也帶入單價）
 const nameKey = name => flat(name).toLowerCase();
 async function memLoad() {
+  // 上次關網頁時來不及寫進資料庫的，先補進去
+  try {
+    const pend = JSON.parse(localStorage.getItem('xlsimg-mempend') || '[]');
+    for (const r of pend) await Store.put('memory', r);
+    localStorage.removeItem('xlsimg-mempend');
+  } catch {}
   const list = (await Store.all('memory')) || [];
   memCache = new Map(list.map(r => [r.hash, r]));
   memByName = new Map(list.filter(r => r.name && r.price != null).sort((a, b) => a.updated - b.updated).map(r => [nameKey(r.name), r]));
@@ -768,18 +774,45 @@ function applyMem() {
     if (p && !img.priceEdited && (img.price === '' || img.priceFromLib)) { img.price = p.price; img.priceFromLib = true; }
   }
 }
+function memRecord(img) {
+  // 品名是 AI 取的、自己改的或之前記住的才記；只是檔名代替的不記，免得下次擋掉 AI 取名
+  const real = img.edited || img.aiDone || img.fromMem;
+  const name = real ? labelOf(img).trim() : '';
+  const price = priceOf(img), spec = (img.spec || '').trim(), size = (img.size || '').trim();
+  const old = memCache.get(img.hash);
+  if (!name && price == null && !spec && !size && !old) return null; // 記過的照片欄位清空也要存，下次才不會帶回舊內容
+  return { v: 2, hash: img.hash, name: name || (old?.v >= 2 ? old.name : '') || '', price, room: img.room || '', spec, size, updated: Date.now() };
+}
 async function memSave(items) {
   for (const img of items) {
-    // 品名是 AI 取的、自己改的或之前記住的才記；只是檔名代替的不記，免得下次擋掉 AI 取名
-    const real = img.edited || img.aiDone || img.fromMem;
-    const name = real ? labelOf(img).trim() : '';
-    const price = priceOf(img), spec = (img.spec || '').trim(), size = (img.size || '').trim();
-    if (!name && price == null && !spec && !size) continue;
-    const old = memCache.get(await hashOf(img));
-    await Store.put('memory', { v: 2, hash: img.hash, name: name || (old?.v >= 2 ? old.name : '') || '', price, room: img.room || '', spec, size, updated: Date.now() });
+    await hashOf(img);
+    const rec = memRecord(img);
+    if (rec) await Store.put('memory', rec);
   }
   await memLoad();
 }
+// 改完馬上記住（使用者 2026-10-31 要求，不用按下載）：停手半秒就存；關網頁、切走前把還沒存的存好
+const memDirty = new Set();
+let memTimer = 0;
+function memFlush() {
+  clearTimeout(memTimer);
+  if (!memDirty.size) return;
+  const list = [...memDirty];
+  memDirty.clear();
+  if ($('libSave').checked) memSave(list).catch(e => errLog.push('memSave: ' + (e?.message || e)));
+}
+function memTouch(img) {
+  memDirty.add(img);
+  clearTimeout(memTimer);
+  memTimer = setTimeout(memFlush, 500);
+}
+// 關網頁時資料庫可能來不及寫完，先同步存一份，下次打開由 memLoad 補進去
+addEventListener('pagehide', () => {
+  if (!memDirty.size || !$('libSave').checked) return;
+  try { localStorage.setItem('xlsimg-mempend', JSON.stringify([...memDirty].filter(i => i.hash).map(memRecord).filter(Boolean))); } catch {}
+  memFlush();
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden) memFlush(); });
 
 // ---------- 對話框 ----------
 function openModal(id) { $(id).hidden = false; $(id).querySelector('button,input')?.focus(); }
@@ -788,7 +821,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-31.1';
+const APP_VERSION = '2026-10-31.2';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -877,14 +910,14 @@ function refresh() {
     + `<td class="c-img"><div class="thumbs"><button type="button" class="del" data-n="${n}" aria-label="刪除第 ${n + 1} 項" title="刪除這張">✕</button><figure><img src="${thumbOf(i)}" data-k="${esc(i.url)}" alt=""><figcaption title="${esc(i.name)}">${esc(i.name)}</figcaption></figure></div></td></tr>`).join('');
   items.forEach((img, n) => {
     const box = $('nm' + n);
-    box.addEventListener('input', () => { img.label = box.value; img.edited = true; updateNames(); });
+    box.addEventListener('input', () => { img.label = box.value; img.edited = true; updateNames(); memTouch(img); });
     box.addEventListener('change', () => { applyMem(); if (!resort()) updateNames(); }); // 改好品名後，產品庫有同名的就帶入單價；空間可能跟著變，重新排
-    $('rm' + n).addEventListener('change', e => { img.room = e.target.value; img.roomEdited = true; img.placed = false; resort(); }); // 換空間就移到那個空間的位置
+    $('rm' + n).addEventListener('change', e => { img.room = e.target.value; img.roomEdited = true; img.placed = false; memTouch(img); resort(); }); // 換空間就移到那個空間的位置
     const on = (id, fn) => $(id + n)?.addEventListener('input', e => fn(e.target.value));
-    on('mt', v => { img.spec = v; img.specEdited = true; }); // 材質（AI 看圖寫的也放這裡）
-    on('z', v => { img.size = v; img.sizeEdited = true; });
+    on('mt', v => { img.spec = v; img.specEdited = true; memTouch(img); }); // 材質（AI 看圖寫的也放這裡）
+    on('z', v => { img.size = v; img.sizeEdited = true; memTouch(img); });
     on('q', v => { img.qty = v; updateTotals(); });
-    on('p', v => { img.price = v; img.priceEdited = true; img.priceFromLib = false; updateTotals(); });
+    on('p', v => { img.price = v; img.priceEdited = true; img.priceFromLib = false; updateTotals(); memTouch(img); });
   });
   updateNames();
 }
