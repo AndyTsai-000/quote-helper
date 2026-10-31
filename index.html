@@ -835,7 +835,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-31.4';
+const APP_VERSION = '2026-10-31.5';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -1160,6 +1160,21 @@ async function fixSheetPr(buf) {
 }
 // ExcelJS 存檔會把範本裡的文字框、圖形、線條弄丟：存完再從範本補回去（範本插過列的話位置跟著往下移）
 // 圖表、SmartArt 沒辦法補，回傳數量讓畫面提醒
+// ExcelJS 存檔會把活頁簿的預設字型換成 Calibri 11。欄寬是用預設字型算的，換掉整張表的欄就變寬或變窄，要換回範本的
+async function keepDefaultFont(tplBuf, outBuf) {
+  const JSZip = await loadLib('jszip');
+  const [a, b] = await Promise.all([JSZip.loadAsync(tplBuf.slice(0)), JSZip.loadAsync(outBuf)]);
+  const sa = await a.file('xl/styles.xml')?.async('string'), sb = await b.file('xl/styles.xml')?.async('string');
+  if (!sa || !sb) return outBuf;
+  const FIRST = /(<fonts\b[^>]*>\s*)(<font\b[\s\S]*?<\/font>|<font\s*\/>)/, font = sa.match(FIRST)?.[2];
+  if (!font) return outBuf;
+  let neu = sb.replace(FIRST, (m, head) => head + font);
+  const nsNeeded = [...font.matchAll(/<(\w+):/g)].some(x => !new RegExp(`xmlns:${x[1]}=`).test(neu));
+  if (nsNeeded) return outBuf; // 用到輸出檔沒宣告的命名空間就不換，免得檔案打不開
+  b.file('xl/styles.xml', neu);
+  return b.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' });
+}
+
 async function keepShapes(tplBuf, outBuf, shifts) {
   const JSZip = await loadLib('jszip');
   const [a, b] = await Promise.all([JSZip.loadAsync(tplBuf.slice(0)), JSZip.loadAsync(outBuf)]);
@@ -1845,6 +1860,7 @@ async function fillXlsxTemplate() {
     if (ks.lost) fillNote += `範本裡有 ${ks.lost} 個圖表或特殊物件沒辦法保留，請打開檔案確認。`;
   } catch (e) { errLog.push('keepShapes: ' + (e?.message || e)); }
   try { out = await fixSheetPr(out); } catch (e) { errLog.push('fixSheetPr: ' + (e?.message || e)); }
+  try { out = await keepDefaultFont(tpl.buf, out); } catch (e) { errLog.push('keepDefaultFont: ' + (e?.message || e)); }
   return new Blob([out], { type: XLSX_TYPE });
 }
 
