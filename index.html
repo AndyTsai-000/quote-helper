@@ -167,6 +167,8 @@ button.go.small{width:auto;font-size:14px;padding:8px 16px;margin-top:0}
         <div class="tplinfo" id="tplInfo" hidden></div>
         <div class="field" id="companyField"><span>公司名稱</span><input type="text" id="qCompany" placeholder="例：好家居設計"></div>
         <div class="field"><span>客戶名稱</span><input type="text" id="qClient" placeholder="例：王先生"></div>
+        <div class="field" id="addrField"><span>地址</span><input type="text" id="qAddr" placeholder="例：台中市北屯區…"></div>
+        <div class="field" id="phoneField"><span>聯絡電話</span><input type="text" id="qPhone" inputmode="tel" placeholder="例：0912-345-678"></div>
         <div class="field" id="taxField"><span>營業稅 5%</span><select id="qTax"><option value="0" selected>不加</option><option value="1">要加</option></select></div>
       </section>
 
@@ -369,10 +371,11 @@ function withRoles(names, hints = []) {
 }
 const TOTAL_RE = /(小計|合計|總計|總價|總金額|營業稅|稅額|稅金)/;
 const CLIENT_LABEL = /(客戶|顧客|業主|貴賓|買受人|訂購人)/, DATE_LABEL = /日期/;
-const CLIENT_ONLY = /^(客戶名稱|客戶姓名|客戶|顧客|業主|貴賓|買受人|訂購人)$/, DATE_ONLY = /^(報價日期|估價日期|日期)$/;
+const CLIENT_ONLY = /^(客戶名稱|客戶姓名|客戶|顧客|業主名稱|業主姓名|業主|貴賓|買受人|訂購人)$/, DATE_ONLY = /^(報價日期|估價日期|日期)$/;
+const ADDR_ONLY = /^(地址|住址|聯絡地址|客戶地址|業主地址|送貨地址|施工地址|案場地址|工地地址)$/, PHONE_ONLY = /^(電話|聯絡電話|連絡電話|客戶電話|業主電話|手機|行動電話)$/;
 // 「客戶：王先生」或「客戶名稱　王先生」都認得
 const STOP = '(?:(?!日期|報價|估價|電話|地址|統一編號|統編|聯絡|傳真|手機|簽|蓋|確認)[^\\s:：])*';
-const CLIENT_RE = new RegExp(`(客戶名稱|客戶姓名|客戶|顧客|業主|貴賓|買受人|訂購人)(\\s*[:：]\\s*|\\s+)${STOP}`, 'g');
+const CLIENT_RE = new RegExp(`(客戶名稱|客戶姓名|客戶|顧客|業主名稱|業主姓名|業主|貴賓|買受人|訂購人)(\\s*[:：]\\s*|\\s+)${STOP}`, 'g');
 // ---------- 日期：照範本原本的寫法填今天 ----------
 // 「115年  月  日」「111年00月00日」→ 115年10月27日；「2024/12/31」→ 2026/10/27；「115/1/1」→ 115/10/27
 const DATE_WORD = /(報價日期|估價日期|訂購日期|日期)/;
@@ -400,8 +403,12 @@ function fillDateText(t) {
 }
 // 把範本上的「客戶：」「日期：」換成這次的
 function fillInfo(t) {
-  const c = $('qClient').value.trim();
-  return fillDateText(String(t).replace(CLIENT_RE, (m, a, b) => a + b + c));
+  const c = $('qClient').value.trim(), addr = $('qAddr').value.trim(), phone = $('qPhone').value.trim();
+  // 地址、電話：標籤後面還空著才填（公司自己的地址電話已經寫好，不會動到）
+  const s = String(t).replace(CLIENT_RE, (m, a, b) => a + b + c)
+    .replace(/(地址|住址)(\s*[:：]\s*)(?=\s|$)/g, (m, a, b) => addr ? a + b + addr : m)
+    .replace(/(聯絡電話|連絡電話|電話|手機)(\s*[:：]\s*)(?=\s|$)/g, (m, a, b) => phone ? a + b + phone : m);
+  return fillDateText(s);
 }
 
 const DEFAULT_COLS = ['項次', '圖片', '品名', '規格', '數量', '單位', '單價', '金額', '備註'];
@@ -828,7 +835,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-31.2';
+const APP_VERSION = '2026-10-31.3';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -1012,6 +1019,7 @@ function renderOptions() {
   const xlsxTpl = tpl?.kind === 'xlsx' && fmt === 'xlsx';
   $('sizeField').hidden = fmt === 'pptx' || xlsxTpl;
   $('taxField').hidden = fmt === 'pptx' || xlsxTpl;
+  $('addrField').hidden = $('phoneField').hidden = fmt === 'pptx';
   $('companyField').hidden = !!tpl;
   $('tplPick').hidden = !!tpl;
   const box = $('tplInfo');
@@ -1536,6 +1544,9 @@ async function buildXlsx() {
     for (let c = 1; c <= N; c++) { const x = ws.getCell(r, c); if (x.master === x && x.value) fitLine(ws, x); } // 客戶、日期字級也依內容調整
     r++;
   }
+  // 沒範本才加這行；有範本（含 PDF）的抬頭自己有地址、電話的話已經由 fillInfo 填好
+  const contact = !tpl ? [['地址', $('qAddr').value.trim()], ['電話', $('qPhone').value.trim()]].filter(x => x[1]).map(x => x[0] + '：' + x[1]).join('　') : '';
+  if (contact) { mergeRow(r, 1, N); ws.getCell(r, 1).value = contact; fitLine(ws, ws.getCell(r, 1)); r++; }
   r++;
 
   const hr = r;
@@ -1920,11 +1931,21 @@ async function fillBlocks(wb, ws, t, rows, items, used, doneBefore) {
   }
 
   // 客戶、日期：只填在標籤旁邊空白的格子
-  const client = $('qClient').value.trim();
+  const client = $('qClient').value.trim(), addr = $('qAddr').value.trim(), phone = $('qPhone').value.trim();
   const infoRows = [...range(1, t.h - 1), ...(t.totEnd ? range(t.totEnd + 1, ws.rowCount) : [])];
+  // 「業主名稱：」這種標籤：標籤格合併得比旁邊寬，就接在標籤後面；否則填旁邊的空格；旁邊有東西就不動
+  const fillLabel = (r, col, cell, text, value) => {
+    const next = ws.getCell(r, col + mergeSpan(ws, cell)).master;
+    const wide = c => sum(cellBox(ws, c.row, c.col).widths);
+    if (/[:：]\s*$/.test(text) && mergeSpan(ws, cell) > 1 && wide(cell) > wide(next)) { cell.value = text.trimEnd() + value; fitLine(ws, cell); }
+    else if (isBlank(next)) { next.value = value; fitLine(ws, next); }
+  };
   for (const r of infoRows) for (const { col, cell, text } of masterCells(ws, r)) {
     if (isFormula(cell)) continue;
     const f = flat(text).replace(/[:：]$/, '');
+    // 地址、電話只看表頭上面（總計下面的多半是公司自己的）
+    const contact = r < t.h ? (ADDR_ONLY.test(f) ? addr : PHONE_ONLY.test(f) ? phone : '') : '';
+    if (contact) { fillLabel(r, col, cell, text, contact); continue; }
     const kind = CLIENT_ONLY.test(f) ? 'client' : DATE_ONLY.test(f) ? 'date' : null;
     if (!kind) {
       // 同一格裡就有日期：「日期：115年  月  日」「中華民國　年　月　日」照原本的寫法填今天
@@ -1932,8 +1953,8 @@ async function fillBlocks(wb, ws, t, rows, items, used, doneBefore) {
       continue;
     }
     if (kind === 'client' && !client) continue;
+    if (kind === 'client') { fillLabel(r, col, cell, text, client); continue; }
     const next = ws.getCell(r, col + mergeSpan(ws, cell)).master;
-    if (kind === 'client') { if (isBlank(next)) { next.value = client; fitLine(ws, next); } continue; }
     // 「日期」旁邊那格：空白填今天；是日期值就換今天（格式不動）；是文字就照它的寫法換
     if (isBlank(next)) next.value = todayStr('/');
     else if (next.value instanceof Date) { const d = new Date(); next.value = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); }
