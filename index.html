@@ -835,7 +835,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-11-01.1';
+const APP_VERSION = '2026-11-01.2';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -1757,7 +1757,7 @@ function insertRows(ws, L, n, srcTop, b) {
   const kept = [];
   below.forEach(m => { for (let r = m.top; r <= m.bottom; r++) for (let c = m.left; c <= m.right; c++) kept.push([r + n, c, clone(ws.getCell(r, c).style)]); });
   below.forEach(m => ws.unMergeCells(m.top, m.left, m.bottom, m.right));
-  const inBlock = merges.filter(m => m.top >= srcTop && m.bottom <= L);
+  const inBlock = merges.filter(m => m.top >= srcTop && m.bottom <= L && m.bottom < srcTop + b);
   const imgs = ws.getImages().filter(m => m.range?.tl && m.range.tl.nativeRow >= L);
   ws.spliceRows(L + 1, 0, ...Array.from({ length: n }, () => []));
   ws.eachRow({ includeEmpty: true }, row => row.eachCell(cell => {
@@ -1797,6 +1797,54 @@ function pickSheet(wb, map, n) {
   return { pick: fit || [...pool].sort((a, b) => b.cap - a.cap)[0], list };
 }
 
+// 紙張（pt）：letter、legal、A3、A4、A5；其他當 A4
+const PAPER_PT = { 1: [612, 792], 5: [612, 1008], 8: [842, 1191], 9: [595, 842], 11: [420, 595] };
+const rowPt = (ws, r) => ws.getRow(r).hidden ? 0 : (ws.getRow(r).height || ws.properties.defaultRowHeight || 15);
+const rowsPt = (ws, a, b) => { let s = 0; for (let r = a; r <= b; r++) s += rowPt(ws, r); return s; };
+// 列印範圍最下面一列、最右邊一欄：有設列印範圍就照它，沒有就看有內容或框線的格子
+function printedEdge(ws) {
+  const pa = /([A-Z]+)\$?(\d+)$/.exec(String(ws.pageSetup.printArea || '').replace(/\$/g, ''));
+  if (pa) return { col: pa[1].split('').reduce((s, ch) => s * 26 + ch.charCodeAt(0) - 64, 0), row: +pa[2] };
+  let col = 1, row = 1;
+  ws.eachRow({ includeEmpty: false }, (rw, r) => rw.eachCell((c, k) => {
+    if (!isBlank(c) || Object.values(c.border || {}).some(Boolean)) { col = Math.max(col, k); row = Math.max(row, r); }
+  }));
+  return { col, row };
+}
+// 活頁簿預設字型的大小：Excel 的欄寬以它的數字寬度為單位
+async function defaultFontPt(buf) {
+  const JSZip = await loadLib('jszip');
+  const s = await (await JSZip.loadAsync(buf.slice(0))).file('xl/styles.xml')?.async('string');
+  return +s?.match(/<fonts\b[^>]*>\s*<font\b[^>]*>[\s\S]*?<sz val="([\d.]+)"/)?.[1] || 11;
+}
+// 一張紙放得下多高（工作表上的 pt）：扣掉邊界、換算列印縮放。
+// 欄寬換算照真 Excel 轉 PDF 量的：字寬約字級 0.507 倍，列印時欄再寬約 5.6%；留 2% 餘裕（超出會把品項切到下一頁）
+function pageRoom(ws, lastCol, fontPt) {
+  const ps = ws.pageSetup, m = ps.margins || {};
+  let [w, h] = PAPER_PT[ps.paperSize] || PAPER_PT[9];
+  if (ps.orientation === 'landscape') [w, h] = [h, w];
+  const W = w - 72 * ((m.left ?? 0.7) + (m.right ?? 0.7)), H = h - 72 * ((m.top ?? 0.75) + (m.bottom ?? 0.75));
+  const digit = Math.round(fontPt * 96 / 72 * 0.507);
+  let sheetW = 0;
+  for (let c = 1; c <= lastCol; c++) if (!ws.getColumn(c).hidden) sheetW += (ws.getColumn(c).width || ws.properties.defaultColWidth || 8.43) * digit * 0.75 * 1.056;
+  const scale = ps.fitToPage ? (ps.fitToWidth === 0 ? 1 : Math.min(1, W / sheetW)) : (ps.scale || 100) / 100;
+  return H / scale * 0.98;
+}
+// 依紙張把品項分頁：放得下就繼續排，最後一頁要連總計、匯款、約定事項一起放得下
+function paginate(ws, blocks, firstUsed, titleH, tailH, room) {
+  const pages = [[]];
+  let used = firstUsed;
+  for (const b of blocks) {
+    const bh = rowsPt(ws, b.top, b.bottom);
+    if (used + bh > room && pages[pages.length - 1].length) { pages.push([]); used = titleH; }
+    pages[pages.length - 1].push(b);
+    used += bh;
+  }
+  const last = pages[pages.length - 1];
+  if (used + tailH > room && last.length > 1) pages.push([last.pop()]);
+  return pages;
+}
+
 let fillNote = '';
 async function fillXlsxTemplate() {
   const wb = new ExcelJS.Workbook();
@@ -1820,7 +1868,34 @@ async function fillXlsxTemplate() {
   }
   // 每一頁的品項位置往下移幾列，第 1 頁就是範本本身
   const shifts = [0];
-  if (all.length > per && !ir0.open && per > 0) {
+  // 品項格連續、大小一樣又都空著，才能照紙張重新分頁（使用者 2026-11-01 回報：第一頁太空）；其他範本維持整段複製
+  const bs = ir0.all[0] ? ir0.all[0].bottom - ir0.all[0].top + 1 : 0;
+  const even = !ir0.open && per > 0 && per === ir0.all.length && ir0.all[0].top === t0.h + 1 && ir0.all[per - 1].bottom === ir0.end
+    && ir0.all.every((b, i) => b.bottom - b.top + 1 === bs && (!i || b.top === ir0.all[i - 1].bottom + 1));
+  if (all.length > per && even) {
+    const top = t0.h + 1, end = ir0.end, edge = printedEdge(ws), extra = (all.length - per) * bs;
+    if (!ws.pageSetup.printTitlesRow) ws.pageSetup.printTitlesRow = `${t0.h}:${t0.h}`;
+    if (ws.pageSetup.fitToPage && ws.pageSetup.fitToHeight !== 0) ws.pageSetup.fitToHeight = 0;
+    const tm = /(\d+):\$?(\d+)/.exec(String(ws.pageSetup.printTitlesRow).replace(/\$/g, ''));
+    const titleH = tm ? rowsPt(ws, +tm[1], +tm[2]) : 0, firstH = rowsPt(ws, 1, t0.h), tailH = rowsPt(ws, end + 1, Math.max(edge.row, end));
+    insertRows(ws, end, extra, top, bs);
+    const added = [];
+    for (let k = 0; k < all.length - per; k++) added.push({ top: end + 1 + k * bs, bottom: end + (k + 1) * bs });
+    ir0.rows.push(...added);
+    const pages = paginate(ws, ir0.rows, firstH, titleH, tailH, pageRoom(ws, edge.col, await defaultFontPt(tpl.buf)));
+    // 每頁表格底線：範本原本靠總計列的上框線收尾，前面幾頁照它補一條
+    const totRow = (t0.tot || end + 1) + extra;
+    pages.slice(0, -1).forEach(pg => {
+      const r = pg[pg.length - 1].bottom;
+      ws.getRow(r).addPageBreak();
+      for (let c = t0.minCol; c <= t0.maxCol; c++) {
+        const line = ws.getCell(totRow, c).border?.top || ws.getCell(end, c).border?.bottom || { style: 'thin' };
+        const cell = ws.getCell(r, c);
+        cell.border = { ...(cell.border || {}), bottom: line };
+      }
+    });
+    fillNote += `品項比範本多，已依紙張排成 ${pages.length} 頁（每頁 ${pages.map(p => p.length).join('、')} 項）；總金額和下面的匯款、約定事項只放在最後一頁。`;
+  } else if (all.length > per && !ir0.open && per > 0) {
     // 品項比範本多：在範本的品項區後面接著新增一頁品項格（中間分頁），
     // 總金額、匯款資料、約定事項整段往下移，只在最後一頁出現；總金額公式的加總範圍會自動延伸到新的品項
     const pages = Math.ceil(all.length / per), top = t0.h + 1, end = ir0.end, H = end - top + 1;
