@@ -828,7 +828,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-10-31.9';
+const APP_VERSION = '2026-11-01.1';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -1924,8 +1924,10 @@ async function fillBlocks(wb, ws, t, rows, items, used, doneBefore) {
       }
     }
     if (spec && !nameHasSpec && (cSpec || cNote)) putLines(ws, cSpec || cNote, r, blk.bottom, vals);
-    put(cQty, qtyOf(img));
-    if (cPrice && priceOf(img) != null) put(cPrice, priceOf(img));
+    // 範本預填的數字（例如數量 1）只是預設值，以網頁上填的為準（使用者 2026-11-01 回報：前 4 項改數量沒顯示）
+    const putNum = (c, v) => { if (!c) return; const cell = ws.getCell(r, c).master; if (typeof cell.value === 'number') cell.value = null; put(c, v); };
+    putNum(cQty, qtyOf(img));
+    if (cPrice && priceOf(img) != null) putNum(cPrice, priceOf(img));
     if (cQty && cPrice) {
       const ac = cAmt && ws.getCell(r, cAmt).master, amt = priceOf(img) != null ? priceOf(img) * qtyOf(img) : null;
       put(cAmt, { formula: `IF(${L(cPrice)}${r}="","",${L(cQty)}${r}*${L(cPrice)}${r})` }, ac ? shownText(ac, amt ?? '') : '');
