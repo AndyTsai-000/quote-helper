@@ -193,6 +193,13 @@ button.go.small{width:auto;font-size:14px;padding:8px 16px;margin-top:0}
           <option value="100" selected>中（100 像素高）</option>
           <option value="160">大（160 像素高）</option>
         </select></div>
+        <div class="field" id="perField" hidden><span>每頁幾件</span><select id="perPage">
+          <option value="1">1 件（大圖）</option>
+          <option value="2">2 件</option>
+          <option value="4" selected>最多 4 件</option>
+        </select></div>
+        <div class="field" id="planField" hidden><span>平面圖 <small>（可不放，放了會排在封面後面）</small></span><label class="mini"><input type="file" id="planFile" accept="image/*,.pdf" multiple>選平面圖</label></div>
+        <div class="picked" id="planName" hidden></div>
         <label class="check"><input type="checkbox" id="libSave" checked> 自動記住改過的品名、尺寸、材質和單價（下次放同一張照片直接帶入）</label>
         <button class="go" id="go" disabled>下載 Excel 估價單</button>
         <div class="msg" id="msg"></div>
@@ -229,6 +236,7 @@ const TPL_EXT = /\.(xlsx|xlsm|pdf|pptx|xls|ppt|ods|odp|numbers|key)$/i; // 舊�
 const EMU = 9525; // 1 像素 = 9525 EMU
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 let images = [], tpl = null; // tpl = { kind, name, buf, spec }
+let plans = []; // PPT 平面圖：每頁一張 { name, file }；沒放就不加這一頁
 
 // ---------- 小工具 ----------
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -835,7 +843,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('
 ['repModal'].forEach(id => $(id).addEventListener('click', e => { if (e.target.id === id) closeModal(id); }));
 
 // ---------- 版本、回報問題 ----------
-const APP_VERSION = '2026-11-01.2';
+const APP_VERSION = '2026-11-06.1';
 const errLog = [];
 addEventListener('error', e => errLog.push(String(e.message || e.error)));
 addEventListener('unhandledrejection', e => errLog.push(String(e.reason?.message || e.reason)));
@@ -850,6 +858,7 @@ function reportText() {
     `檔案類型：${$('qFmt').selectedOptions[0].text}`,
     `範本：${tpl ? `${tpl.name}（${tpl.kind}）` : '沒有用範本'}`,
   ];
+  if ($('qFmt').value === 'pptx') lines.push(`每頁幾件：${$('perPage').selectedOptions[0].text}　平面圖：${plans.length ? plans.length + ' 頁' : '沒有放'}`);
   if (s && tpl.kind === 'xlsx') {
     lines.push(`  欄位用途：${s.cols.filter(c => ROLE_LABEL[c.role]).map(c => `${c.letter} ${c.name}→${roleLabel(c)}`).join('、')}${s.map ? '（AI 判斷）' : ''}`);
     lines.push(`  品項位置：${s.slots}　圖片放在：${s.imgAt.trim()}`);
@@ -1020,6 +1029,8 @@ function renderOptions() {
   $('sizeField').hidden = fmt === 'pptx' || xlsxTpl;
   $('taxField').hidden = fmt === 'pptx' || xlsxTpl;
   $('addrField').hidden = $('phoneField').hidden = fmt === 'pptx';
+  $('perField').hidden = $('planField').hidden = fmt !== 'pptx';
+  $('planName').hidden = fmt !== 'pptx' || !plans.length;
   $('companyField').hidden = !!tpl;
   $('tplPick').hidden = !!tpl;
   const box = $('tplInfo');
@@ -2095,6 +2106,58 @@ function fitBottom(cell, iw, ih) {
   const k = Math.min(cell.w / iw, cell.h / ih), w = iw * k, h = ih * k;
   return { x: cell.x + (cell.w - w) / 2, y: cell.y + cell.h - h, w, h };
 }
+function fitCenter(cell, iw, ih) {
+  const k = Math.min(cell.w / iw, cell.h / ih), w = iw * k, h = ih * k;
+  return { x: cell.x + (cell.w - w) / 2, y: cell.y + (cell.h - h) / 2, w, h };
+}
+const perPage = () => +$('perPage').value || 4;
+const planTitle = n => plans.length > 1 ? `平面配置圖（${n + 1}/${plans.length}）` : '平面配置圖';
+
+// ---------- 平面圖（PPT 封面後面） ----------
+// 圖檔一張一頁；PDF 每頁轉成圖片（最多 6 頁）
+async function readPlans(files) {
+  const out = [];
+  for (const f of files) {
+    if (/\.pdf$/i.test(f.name) || f.type === 'application/pdf') {
+      const pdfjs = await loadLib('pdf');
+      pdfjs.GlobalWorkerOptions.workerSrc = PDF_WORKER;
+      let pdf;
+      try { pdf = await pdfjs.getDocument({ data: new Uint8Array(await f.arrayBuffer()) }).promise; }
+      catch { throw new Error(`「${f.name}」打不開，可能有密碼保護或檔案損毀。`); }
+      for (let n = 1; n <= Math.min(pdf.numPages, 6); n++) {
+        const page = await pdf.getPage(n), v1 = page.getViewport({ scale: 1 });
+        const vp = page.getViewport({ scale: Math.min(4, 2400 / Math.max(v1.width, v1.height)) });
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+        const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height);
+        await page.render({ canvasContext: g, viewport: vp }).promise;
+        const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+        out.push({ name: pdf.numPages > 1 ? `${f.name} 第 ${n} 頁` : f.name, file: new File([blob], stemOf(f.name) + `_${n}.png`, { type: 'image/png' }) });
+      }
+    } else if (IMG_EXT.test(f.name) || /^image\//.test(f.type)) out.push({ name: f.name, file: f });
+    else throw new Error(`「${f.name}」不是圖片或 PDF，平面圖請用圖檔或 PDF。`);
+  }
+  return out;
+}
+function renderPlans() {
+  const box = $('planName');
+  box.innerHTML = plans.length ? `✓ 平面圖 ${plans.length} 頁：${esc(plans.map(p => p.name).join('、'))} <button type="button" class="link" id="planClear">移除平面圖</button>` : '';
+  box.hidden = !plans.length || $('qFmt').value !== 'pptx';
+  $('planClear')?.addEventListener('click', () => { plans = []; renderPlans(); });
+}
+$('planFile').addEventListener('change', async e => {
+  const files = [...e.target.files]; e.target.value = '';
+  if (!files.length) return;
+  try {
+    showMsg('讀取平面圖…');
+    plans = await readPlans(files);
+    // 裁掉圖面外多餘的白邊，平面圖才放得大
+    for (const p of plans) { try { p.file = await processImage(p.file, 'trim') || p.file; } catch {} }
+    showMsg('');
+  }
+  catch (err) { showMsg(err.message || String(err), true); }
+  renderPlans();
+});
 
 async function buildPptx() {
   if (tpl?.kind === 'pptx') return fillPptx();
@@ -2103,7 +2166,7 @@ async function buildPptx() {
   const pres = new PptxGenJS();
   pres.layout = 'LAYOUT_WIDE'; // 13.33 x 7.5 英吋
   const FONT = 'Microsoft JhengHei', GREEN = '1F7A4D', INK = '1D2621', GREY = '5F6D65';
-  const items = quoteItems(), pages = roomPages(items);
+  const items = quoteItems(), pages = roomPages(items, perPage());
 
   const cover = pres.addSlide();
   cover.background = { color: 'F3F5F2' };
@@ -2111,6 +2174,17 @@ async function buildPptx() {
   cover.addText(company || '產品提案', { x: 1, y: 2.3, w: 11.3, h: 1.2, fontFace: FONT, fontSize: 40, bold: true, color: INK });
   cover.addText([client ? '提案對象：' + client : '', '日期：' + todayStr('/'), `共 ${items.length} 項`].filter(Boolean).join('　｜　'),
     { x: 1, y: 3.6, w: 11.3, h: 0.6, fontFace: FONT, fontSize: 18, color: GREY });
+
+  for (let n = 0; n < plans.length; n++) {
+    const s = pres.addSlide();
+    s.background = { color: 'FFFFFF' };
+    s.addText(planTitle(n), { x: 0.6, y: 0.35, w: 12.13, h: 0.8, fontFace: FONT, fontSize: 28, bold: true, color: INK });
+    s.addShape(pres.ShapeType.line, { x: 0.6, y: 1.2, w: 12.13, h: 0, line: { color: GREEN, width: 2 } });
+    try {
+      const p = await prepImage(plans[n].file, 1100);
+      s.addImage({ data: await toDataURL(p.buffer, p.extension), ...fitCenter({ x: 0.6, y: 1.45, w: 12.13, h: 5.75 }, p.w, p.h) });
+    } catch {}
+  }
 
   let done = 0;
   for (const pg of pages) {
@@ -2124,7 +2198,7 @@ async function buildPptx() {
       const img = pg.items[j];
       showMsg(`處理圖片 ${++done} / ${items.length}…`);
       try {
-        const p = await prepImage(await srcOf(img), 720);
+        const p = await prepImage(await srcOf(img), perPage() === 1 ? 1080 : 720);
         s.addImage({ data: await toDataURL(p.buffer, p.extension), ...fitBottom(cells[j], p.w, p.h) });
       } catch {}
       const sub = detailLines(img);
@@ -2302,79 +2376,109 @@ async function fillPptx() {
 
   let slideNum = Math.max(0, ...Object.keys(zip.files).map(f => +((f.match(/^ppt\/slides\/slide(\d+)\.xml$/) || [])[1] || 0)));
   let sldId = Math.max(255, ...slides.map(s => +s.el.getAttribute('id')));
-  const items = quoteItems(), pages = roomPages(items), newEls = [];
-  let done = 0;
+  const max = perPage(), items = quoteItems(), pages = roomPages(items, max), newEls = [], planEls = [];
+  let done = 0, qs = 0;
 
-  for (let pi = 0; pi < pages.length; pi++) {
-    const pg = pages[pi];
-    let base = await baseSlide(pi + 1, false), free = largestFree(base.obstacles, CX, CY);
+  // 複製出來的頁面加進簡報（還沒排順序）
+  function register(doc, rels) {
+    const path = `ppt/slides/slide${++slideNum}.xml`;
+    zip.file(path, xmlStr(doc));
+    zip.file(relsPath(path), xmlStr(rels));
+    ctAdd('Override', { PartName: '/' + path, ContentType: 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml' });
+    const prid = 'rIdQS' + (++qs);
+    const pr = presRels.createElementNS(REL_NS, 'Relationship');
+    pr.setAttribute('Id', prid); pr.setAttribute('Type', REL_T + 'slide'); pr.setAttribute('Target', `slides/slide${slideNum}.xml`);
+    presRels.documentElement.appendChild(pr);
+    const el = pres.createElementNS(NS.p, 'p:sldId');
+    el.setAttribute('id', ++sldId); el.setAttributeNS(NS.r, 'r:id', prid);
+    return el;
+  }
+  function addPic(doc, rels, id, buffer, extension, name, b) {
+    const ext = extension === 'png' ? 'png' : 'jpeg', media = `${name}.${ext}`, rid = 'rIdQ' + id;
+    zip.file('ppt/media/' + media, buffer);
+    if (!ctHasDefault(ext)) ctAdd('Default', { Extension: ext, ContentType: 'image/' + ext });
+    const rel = rels.createElementNS(REL_NS, 'Relationship');
+    rel.setAttribute('Id', rid); rel.setAttribute('Type', REL_T + 'image'); rel.setAttribute('Target', '../media/' + media);
+    rels.documentElement.appendChild(rel);
+    return picNode(doc, id, rid, b);
+  }
+  // 頁面空白區、標題位置
+  async function layout(tag) {
+    let base = await baseSlide(tag, false), free = largestFree(base.obstacles, CX, CY);
     // 裝飾佔掉一半以上就改用乾淨的頁面（只留 Logo）
-    if (area(free) < AREA * 0.45) { base = await baseSlide(pi + 1, true); free = largestFree(base.obstacles, CX, CY); }
-    const { doc, rels, rpr } = base;
-    const tree = doc.getElementsByTagNameNS(NS.p, 'spTree')[0];
-    let nextId = Math.max(1, ...[...doc.getElementsByTagNameNS(NS.p, 'cNvPr')].map(e => +e.getAttribute('id') || 0)) + 1;
-
+    if (area(free) < AREA * 0.45) { base = await baseSlide(tag, true); free = largestFree(base.obstacles, CX, CY); }
+    const tree = base.doc.getElementsByTagNameNS(NS.p, 'spTree')[0];
+    const nextId = Math.max(1, ...[...base.doc.getElementsByTagNameNS(NS.p, 'cNvPr')].map(e => +e.getAttribute('id') || 0)) + 1;
     // 空白區留邊：上方放空間名稱，下面排圖片和品名
-    // 排版照使用者 2026-10-27 改過的簡報：空間名稱在左上角（右上角有 Logo 就同一排、不重疊），
-    // 品項緊接在標題下面往下排，圖片約頁高 28%、品名加尺寸材質兩行約 10%
-    const pad = Math.min(free.w, free.h) * 0.02, gap = Math.min(CX, CY) * 0.03;
+    // 排版照使用者 2026-10-27 改過的簡報：空間名稱在左上角（右上角有 Logo 就同一排、不重疊）
+    const pad = Math.min(free.w, free.h) * 0.02;
     const hits = b => base.obstacles.some(o => b.x < o.x + o.w && o.x < b.x + b.w && b.y < o.y + o.h && o.y < b.y + b.h);
     const titleH = CY * 0.076, tx = free.x + pad, tw = Math.min(free.w - pad * 2, CX * 0.45);
     let ty = 0;
     while (ty < free.y + pad && hits({ x: tx, y: ty, w: tw, h: titleH })) ty += CY * 0.01;
     ty = Math.min(ty, free.y + pad);
     const top = Math.max(ty + titleH + CY * 0.018, free.y + pad), bottom = free.y + free.h - pad;
+    return { ...base, tree, nextId, free, pad, titleH, tx, tw, ty, top, bottom };
+  }
+  const pt = emu => Math.round(emu / 12700);
+  const titleSz = L => Math.min(3200, Math.max(1600, pt(L.titleH) * 60));
+
+  // 平面圖：有放才加，接在封面後面
+  for (let n = 0; n < plans.length; n++) {
+    const L = await layout('P' + (n + 1));
+    let id = L.nextId;
+    const body = { x: L.free.x + L.pad, y: L.top, w: L.free.w - L.pad * 2, h: L.bottom - L.top };
+    L.tree.appendChild(textBox(L.doc, id++, { x: L.tx, y: L.ty, w: Math.max(L.tw, body.w), h: L.titleH }, planTitle(n), L.rpr, titleSz(L), true, 'l'));
+    try {
+      const p = await prepImage(plans[n].file, 1100);
+      L.tree.appendChild(addPic(L.doc, L.rels, id++, p.buffer, p.extension, `qplan${n + 1}`, fitCenter(body, p.w, p.h)));
+    } catch {}
+    planEls.push(register(L.doc, L.rels));
+  }
+
+  for (let pi = 0; pi < pages.length; pi++) {
+    const pg = pages[pi];
+    const L = await layout(pi + 1), { doc, rels, rpr, tree, free, pad, top, bottom } = L;
+    let nextId = L.nextId;
+    // 品項緊接在標題下面往下排，每頁 4 件時圖片約頁高 28%、品名加尺寸材質兩行約 10%；每頁 1、2 件圖片放大
+    const gap = Math.min(CX, CY) * 0.03;
     const lines = Math.max(0, ...pg.items.map(i => detailLines(i).length)), more = lines > 0; // 有尺寸、材質就多留幾行
     const capH = CY * [0.065, 0.1, 0.12][lines];
     const n = pg.items.length, cols = n <= 1 ? 1 : n === 2 ? 2 : n === 3 ? ((free.w - pad * 2) / (bottom - top) > 1.6 ? 3 : 2) : 2, rows = Math.ceil(n / cols);
-    const rowH = Math.min((bottom - top - gap * (rows - 1)) / rows, CY * 0.28 + capH);
+    const rowH = Math.min((bottom - top - gap * (rows - 1)) / rows, max === 4 ? CY * 0.28 + capH : max === 2 ? CY * 0.5 + capH : Infinity);
     const body = { x: free.x + pad, y: top, w: free.w - pad * 2, h: rowH * rows + gap * (rows - 1) };
     const cells = gridCells(body, n, capH, gap);
-    const pt = emu => Math.round(emu / 12700);
-    tree.appendChild(textBox(doc, nextId++, { x: tx, y: ty, w: Math.max(tw, body.w), h: titleH }, pg.title, rpr, Math.min(3200, Math.max(1600, pt(titleH) * 60)), true, 'l'));
+    tree.appendChild(textBox(doc, nextId++, { x: L.tx, y: L.ty, w: Math.max(L.tw, body.w), h: L.titleH }, pg.title, rpr, titleSz(L), true, 'l'));
     for (let j = 0; j < pg.items.length; j++) {
       const img = pg.items[j];
       showMsg(`處理圖片 ${++done} / ${items.length}…`);
       try {
-        const p = await prepImage(await srcOf(img), 720);
-        const ext = p.extension === 'png' ? 'png' : 'jpeg', media = `qimg${pi + 1}_${j + 1}.${ext}`, rid = 'rIdQ' + (j + 1);
-        zip.file('ppt/media/' + media, p.buffer);
-        if (!ctHasDefault(ext)) ctAdd('Default', { Extension: ext, ContentType: 'image/' + ext });
-        const rel = rels.createElementNS(REL_NS, 'Relationship');
-        rel.setAttribute('Id', rid); rel.setAttribute('Type', REL_T + 'image'); rel.setAttribute('Target', '../media/' + media);
-        rels.documentElement.appendChild(rel);
-        tree.appendChild(picNode(doc, nextId++, rid, fitBottom(cells[j], p.w, p.h)));
+        const p = await prepImage(await srcOf(img), max === 1 ? 1080 : 720);
+        tree.appendChild(addPic(doc, rels, nextId++, p.buffer, p.extension, `qimg${pi + 1}_${j + 1}`, fitBottom(cells[j], p.w, p.h)));
       } catch {}
       tree.appendChild(textBox(doc, nextId++, cells[j].cap, labelOf(img), rpr, Math.min(1800, Math.max(1000, pt(more ? CY * 0.1 : capH) * (more ? 32 : 55))), false, 'ctr', detailLines(img)));
     }
-
-    const path = `ppt/slides/slide${++slideNum}.xml`;
-    zip.file(path, xmlStr(doc));
-    zip.file(relsPath(path), xmlStr(rels));
-    ctAdd('Override', { PartName: '/' + path, ContentType: 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml' });
-    const prid = 'rIdQS' + (pi + 1);
-    const pr = presRels.createElementNS(REL_NS, 'Relationship');
-    pr.setAttribute('Id', prid); pr.setAttribute('Type', REL_T + 'slide'); pr.setAttribute('Target', `slides/slide${slideNum}.xml`);
-    presRels.documentElement.appendChild(pr);
-    const el = pres.createElementNS(NS.p, 'p:sldId');
-    el.setAttribute('id', ++sldId); el.setAttributeNS(NS.r, 'r:id', prid);
-    newEls.push(el);
+    newEls.push(register(doc, rels));
   }
 
-  // 插在結尾頁前面（範本只有 1、2 頁就放最後）；章節也跟著加進去
-  const before = slides.length >= 3 ? slides[slides.length - 1] : null;
-  newEls.forEach(e => lst.insertBefore(e, before ? before.el : null));
-  const prevId = (before ? slides[slides.length - 2] : slides[slides.length - 1]).el.getAttribute('id');
-  for (const hit of pres.getElementsByTagNameNS('*', 'sldId')) {
-    if (hit.namespaceURI === NS.p || hit.getAttribute('id') !== prevId) continue;
-    let after = hit;
-    for (const e of newEls) {
-      const n = pres.createElementNS(hit.namespaceURI, hit.prefix ? hit.prefix + ':sldId' : 'sldId');
-      n.setAttribute('id', e.getAttribute('id'));
-      after.after(n); after = n;
+  // 新頁面接在 prev 那頁後面；章節也跟著加進去
+  function insertAfter(prev, els) {
+    const ref = prev.el.nextSibling;
+    els.forEach(e => lst.insertBefore(e, ref));
+    for (const hit of pres.getElementsByTagNameNS('*', 'sldId')) {
+      if (hit.namespaceURI === NS.p || hit.getAttribute('id') !== prev.el.getAttribute('id')) continue;
+      let after = hit;
+      for (const e of els) {
+        const n = pres.createElementNS(hit.namespaceURI, hit.prefix ? hit.prefix + ':sldId' : 'sldId');
+        n.setAttribute('id', e.getAttribute('id'));
+        after.after(n); after = n;
+      }
+      break;
     }
-    break;
   }
+  // 品項插在結尾頁前面（範本只有 1、2 頁就放最後）；平面圖插在封面後面
+  insertAfter(slides.length >= 3 ? slides[slides.length - 2] : slides[slides.length - 1], newEls);
+  if (planEls.length) insertAfter(slides[0], planEls);
 
   zip.file('ppt/presentation.xml', xmlStr(pres));
   zip.file('ppt/_rels/presentation.xml.rels', xmlStr(presRels));
@@ -2428,6 +2532,8 @@ $('aiOn').addEventListener('change', () => {
 try { if (localStorage.getItem('xlsimg-ai') === '0') $('aiOn').checked = false; } catch {}
 try { if (localStorage.getItem('xlsimg-tax') === '1') $('qTax').value = '1'; } catch {}
 $('qTax').addEventListener('change', () => { try { localStorage.setItem('xlsimg-tax', $('qTax').value); } catch {} });
+try { const pp = localStorage.getItem('xlsimg-per'); if (pp && $('perPage').querySelector(`option[value="${pp}"]`)) $('perPage').value = pp; } catch {}
+$('perPage').addEventListener('change', () => { try { localStorage.setItem('xlsimg-per', $('perPage').value); } catch {} });
 
 // ---------- 拖放（可拖整個資料夾） ----------
 function readEntry(entry) {
